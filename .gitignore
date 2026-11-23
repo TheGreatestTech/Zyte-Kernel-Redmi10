@@ -13,3 +13,6 @@
 /toolchains/
 /Zyte-Kernel/
 *.zip
+
+# Local build logs
+/.build-logs/
