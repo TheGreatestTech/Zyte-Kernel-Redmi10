@@ -1,0 +1,15 @@
+# The kernel source is cloned by the workflow at the pinned ref and patched
+# in place. It is intentionally not committed - the integrations are applied
+# from patches/ at build time, so the kernel tree stays pristine.
+/source/
+
+# Build products
+/out/
+/releases/
+/.ccache/
+/zips/
+
+# Fetched on demand (CI clones/downloads them, locally build.sh fetches them)
+/toolchains/
+/Zyte-Kernel/
+*.zip

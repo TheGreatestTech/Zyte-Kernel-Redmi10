@@ -1,0 +1,278 @@
+name: Build Zyte Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      neutron_tag:
+        description: 'Neutron Clang release tag (use latest or a specific tag)'
+        required: false
+        default: 'latest'
+        type: string
+      kernel_ref:
+        description: 'Kernel branch/tag/commit to build (default: pinned ref below)'
+        required: false
+        default: ''
+        type: string
+      variant:
+        description: 'Kernel variant'
+        required: false
+        default: 'kazesu'
+        type: choice
+        options:
+          - kazesu
+          - all-in-one
+          - base
+  schedule:
+    - cron: '0 0 * * 0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zyte-kernel-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KBUILD_BUILD_USER: github-actions
+  KBUILD_BUILD_HOST: github
+  KBUILD_BUILD_VERSION: '1'
+  # The kernel source is a separate repository; this repo only carries the
+  # build script and the patches. Pin the ref so the patches always apply.
+  KERNEL_REPO: 'https://github.com/TheGreatestTech/MT6768-Kernel-4.19.git'
+  KERNEL_BRANCH: 'lineage-24.0'
+  KERNEL_PIN: '1fbd52855444'
+
+jobs:
+  build:
+    name: Build ${{ inputs.variant || 'kazesu' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout build repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set build date
+        run: |
+          set -Eeuo pipefail
+          echo "BUILD_DATE=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_ENV"
+
+      - name: Free runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl device-tree-compiler \
+            flex git libelf-dev libncurses-dev libssl-dev lz4 make patch \
+            perl pkg-config python3 python3-requests rsync unzip zip zstd wget
+
+      - name: Checkout kernel source
+        run: |
+          set -Eeuo pipefail
+          REF="${{ inputs.kernel_ref || env.KERNEL_PIN }}"
+          rm -rf source
+          mkdir -p source
+          git -C source init -q
+          git -C source remote add origin "$KERNEL_REPO"
+          if ! git -C source fetch --depth 1 origin "$REF"; then
+            echo "::warning::Could not fetch '$REF' directly, trying branch '$KERNEL_BRANCH'"
+            git -C source fetch --depth 1 origin "$KERNEL_BRANCH"
+            git -C source checkout -q --detach FETCH_HEAD
+          else
+            git -C source checkout -q --detach FETCH_HEAD
+          fi
+          test -f source/Makefile
+          echo "KERNEL_COMMIT=$(git -C source rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+          echo "Kernel: $(git -C source log -1 --format='%h %s')"
+
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Resolve Neutron Clang tag
+        id: neutron
+        env:
+          REQUESTED_TAG: ${{ inputs.neutron_tag || 'latest' }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$REQUESTED_TAG" == "latest" ]]; then
+            TAG="$(curl -fsSL --retry 5 --retry-all-errors \
+              https://raw.githubusercontent.com/Neutron-Toolchains/clang-build-catalogue/main/latest.txt \
+              | awk '/^\[tag\]$/{getline; print; exit}')"
+          else
+            TAG="$REQUESTED_TAG"
+            curl -fsSL --retry 5 --retry-all-errors \
+              "https://raw.githubusercontent.com/Neutron-Toolchains/clang-build-catalogue/main/${TAG}-info.txt" \
+              -o /dev/null
+          fi
+          [[ -n "$TAG" ]] || { echo 'Could not resolve Neutron Clang tag' >&2; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using Neutron Clang tag: $TAG"
+
+      - name: Cache Neutron Clang
+        id: cache-neutron
+        uses: actions/cache@v4
+        with:
+          path: toolchains/neutron-clang
+          key: neutron-clang-${{ runner.os }}-${{ steps.neutron.outputs.tag }}
+
+      - name: Download Neutron Clang with AntMan
+        if: steps.cache-neutron.outputs.cache-hit != 'true'
+        run: |
+          set -Eeuo pipefail
+          mkdir -p toolchains/neutron-clang
+          cd toolchains/neutron-clang
+          curl -fsSLo antman https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman
+          chmod +x antman
+          ./antman "-S=${{ steps.neutron.outputs.tag }}"
+
+      - name: Verify Neutron Clang
+        run: |
+          set -Eeuo pipefail
+          test -x toolchains/neutron-clang/bin/clang
+          test -x toolchains/neutron-clang/bin/ld.lld
+          toolchains/neutron-clang/bin/clang --version | head -n 2
+
+      - name: Cache compiler objects
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: zyte-selene-${{ runner.os }}-${{ steps.neutron.outputs.tag }}-${{ env.KERNEL_COMMIT }}
+          max-size: 5G
+          variant: main
+
+      - name: Checkout selene AnyKernel3 template
+        uses: actions/checkout@v4
+        with:
+          repository: TheGreatestTech/AnyKernel3-selene
+          ref: master
+          path: Zyte-Kernel
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify AnyKernel3 template
+        run: |
+          set -Eeuo pipefail
+          test -f Zyte-Kernel/anykernel.sh
+          test -f Zyte-Kernel/tools/ak3-core.sh
+          test -f Zyte-Kernel/META-INF/com/google/android/update-binary
+          echo "ANYKERNEL_COMMIT=$(git -C Zyte-Kernel rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+
+      - name: Apply root/SUSFS/NoMount integration
+        run: |
+          set -Eeuo pipefail
+          bash ./build.sh --ci-integrate-only --variant "${{ inputs.variant || 'kazesu' }}"
+
+      - name: Build kernel
+        env:
+          BUILD_VARIANT: ${{ inputs.variant || 'kazesu' }}
+          OUT_DIR: ${{ github.workspace }}/out
+          TOOLCHAIN_DIR: ${{ github.workspace }}/toolchains/neutron-clang
+          ANYKERNEL_DIR: ${{ github.workspace }}/Zyte-Kernel
+          MAKE_LOAD_LIMIT: "2"
+        run: |
+          set -Eeuo pipefail
+          bash ./build.sh --clean --reconfig --variant "${{ inputs.variant || 'kazesu' }}"
+
+          ZIP="$(find out -maxdepth 1 -type f -name 'Zyte-Kernel-*.zip' -print -quit)"
+          [[ -n "$ZIP" && -s "$ZIP" ]] || {
+            echo 'Kernel zip was not produced' >&2
+            exit 1
+          }
+          mkdir -p releases/logs
+          cp -f "$ZIP" releases/
+          cp -f out/build.log releases/logs/build.log
+          echo "KERNEL_RELEASE=$(cat out/include/config/kernel.release)" >> "$GITHUB_ENV"
+          echo "Package: $(basename "$ZIP")"
+
+      - name: Verify release files and generate checksums
+        run: |
+          set -Eeuo pipefail
+          mapfile -t ZIPS < <(find releases -maxdepth 1 -type f -name '*.zip' | sort)
+          [[ "${#ZIPS[@]}" -eq 1 ]] || {
+            echo "Expected exactly one ZIP, found ${#ZIPS[@]}" >&2
+            printf '%s\n' "${ZIPS[@]}"
+            exit 1
+          }
+          (cd releases && sha256sum ./*.zip > SHA256SUMS)
+          cat releases/SHA256SUMS
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zyte-Kernel-${{ env.BUILD_DATE }}
+          path: |
+            releases/*.zip
+            releases/SHA256SUMS
+            releases/logs/*.log
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: zyte-kernel-${{ env.BUILD_DATE }}
+          name: Zyte Kernel Build - ${{ env.BUILD_DATE }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            # 🎯 Zyte Kernel Build for Redmi 10 Prime (selene / MT6768)
+
+            Automated kernel build with **BakaSU** (manual hook) + optional **SUSFS v2.4.0** + **NoMount**.
+
+            ---
+            ### 📦 Source & Toolchain
+            | Component | Version |
+            |-----------|---------|
+            | **Kernel** | `${{ env.KERNEL_COMMIT }}` (LineageOS 24.0, 4.19.325) |
+            | **Release** | `${{ env.KERNEL_RELEASE }}` |
+            | **Clang** | `${{ steps.neutron.outputs.tag }}` (Neutron Toolchains) |
+            | **AnyKernel3** | `${{ env.ANYKERNEL_COMMIT }}` |
+            | **Root** | `${{ env.KAZESU_COMMIT }}` (BakaSU) |
+            | **NoMount** | `${{ env.NOMOUNT_COMMIT }}` |
+
+            ---
+            ### 🏗️ Build Configuration
+            - **Variant:** `${{ inputs.variant || 'kazesu' }}`
+            - **Root:** BakaSU (`CONFIG_KSU=y`, manual hook mode)
+            - **SUSFS:** v2.4.0 (all-in-one only)
+            - **Logging:** Disabled (`CONFIG_KSU_SUSFS_ENABLE_LOG` not set)
+
+            ---
+            ### 📥 Installation
+            1. Download the `Zyte-Kernel-*.zip` from this release
+            2. Verify SHA-256 checksum (see `SHA256SUMS`)
+            3. Flash via **TWRP** / **OrangeFox** / any custom recovery
+            4. Reboot
+
+            > ⚠️ **Note:** This kernel is for **Redmi 10 Prime (selene)** only.
+
+            ---
+            ### 🔗 Links
+            - [Kernel source](https://github.com/TheGreatestTech/MT6768-Kernel-4.19)
+            - [AnyKernel3 Template](https://github.com/TheGreatestTech/AnyKernel3-selene)
+            - [BakaSU](https://github.com/Baka-SU/BakaSU)
+            - [SUSFS](https://gitlab.com/simonpunk/susfs4ksu)
+            - [NoMount](https://github.com/maxsteeel/nomount)
+
+            Built with ❤️ using GitHub Actions
+          files: |
+            releases/*.zip
+            releases/SHA256SUMS
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false

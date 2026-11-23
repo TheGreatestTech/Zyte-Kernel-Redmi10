@@ -1,0 +1,204 @@
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+index 70ffffea3e58..e6d5914f26fb 100644
+--- a/drivers/input/input.c
++++ b/drivers/input/input.c
+@@ -444,11 +444,17 @@ static void input_handle_event(struct input_dev *dev,
+  * to 'seed' initial state of a switch or initial position of absolute
+  * axis, etc.
+  */
++extern bool ksu_input_hook __read_mostly;
++extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
++
+ void input_event(struct input_dev *dev,
+ 		 unsigned int type, unsigned int code, int value)
+ {
+ 	unsigned long flags;
+ 
++	if (unlikely(ksu_input_hook))
++		ksu_handle_input_handle_event(&type, &code, &value);
++
+ 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
+ 
+ 		spin_lock_irqsave(&dev->event_lock, flags);
+diff --git a/fs/exec.c b/fs/exec.c
+index 9de9a41b3f5a..61c5834bfb5d 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -1728,6 +1728,11 @@ static int exec_binprm(struct linux_binprm *bprm)
+ /*
+  * sys_execve() executes a new program.
+  */
++extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
++			void *envp, int *flags);
++extern int ksu_handle_post_execveat(int *fd, struct filename **filename_ptr, void *argv,
++			void *envp, int *flags, int *retval);
++
+ static int __do_execve_file(int fd, struct filename *filename,
+ 			    struct user_arg_ptr argv,
+ 			    struct user_arg_ptr envp,
+@@ -1737,10 +1742,13 @@ static int __do_execve_file(int fd, struct filename *filename,
+ 	struct linux_binprm *bprm;
+ 	struct files_struct *displaced;
+ 	int retval;
++	bool is_su_session = false;
+ 
+ 	if (IS_ERR(filename))
+ 		return PTR_ERR(filename);
+ 
++	is_su_session = !ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
++
+ 	/*
+ 	 * We move the actual failure in case of RLIMIT_NPROC excess from
+ 	 * set*uid() to execve() because too many poorly written programs
+@@ -1857,6 +1865,9 @@ static int __do_execve_file(int fd, struct filename *filename,
+ 	if (retval < 0)
+ 		goto out;
+ 
++	if (unlikely(is_su_session))
++		(void)ksu_handle_post_execveat(&fd, &filename, &argv, &envp, &flags, &retval);
++
+ 	/* execve succeeded */
+ 	current->fs->in_exec = 0;
+ 	current->in_execve = 0;
+diff --git a/fs/open.c b/fs/open.c
+index 6a5194e8ff4b..375491e3ed8e 100644
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -345,6 +345,9 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
+  * We do this by temporarily clearing all FS-related capabilities and
+  * switching the fsuid/fsgid around to the real ones.
+  */
++extern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode,
++			int *flags);
++
+ long do_faccessat(int dfd, const char __user *filename, int mode)
+ {
+ 	const struct cred *old_cred;
+@@ -395,6 +398,8 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
+ 
+ 	old_cred = override_creds(override_cred);
+ retry:
++	/* the handler may replace the path with the "su" shell path */
++	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
+ 	res = user_path_at(dfd, filename, lookup_flags, &path);
+ 	if (res)
+ 		goto out;
+diff --git a/fs/read_write.c b/fs/read_write.c
+index ec2d20ddd766..87d5c69dd4e0 100644
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -586,8 +586,13 @@ ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
+ 	return ret;
+ }
+ 
++extern bool ksu_init_rc_hook __read_mostly;
++extern int ksu_handle_sys_read(unsigned int fd, char __user **buf_ptr, size_t *count_ptr);
++
+ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+ {
++	if (unlikely(ksu_init_rc_hook))
++		ksu_handle_sys_read(fd, &buf, &count);
+ 	return ksys_read(fd, buf, count);
+ }
+ 
+diff --git a/fs/stat.c b/fs/stat.c
+index 376543199b5a..00cc524fa99b 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -163,6 +163,10 @@ EXPORT_SYMBOL(vfs_statx_fd);
+  *
+  * 0 will be returned on success, and a -ve error code if unsuccessful.
+  */
++extern int ksu_handle_stat(int *dfd, const char __user **filename, int *flags);
++extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
++extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
++
+ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 	      struct kstat *stat, u32 request_mask)
+ {
+@@ -182,6 +186,7 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 		lookup_flags |= LOOKUP_EMPTY;
+ 
+ retry:
++	ksu_handle_stat(&dfd, &filename, &flags);
+ 	error = user_path_at(dfd, filename, lookup_flags, &path);
+ 	if (error)
+ 		goto out;
+@@ -360,6 +365,7 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
+ 	struct kstat stat;
+ 	int error;
+ 
++	ksu_handle_stat(&dfd, &filename, &flag);
+ 	error = vfs_fstatat(dfd, filename, &stat, flag);
+ 	if (error)
+ 		return error;
+@@ -375,6 +381,8 @@ SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+ 	if (!error)
+ 		error = cp_new_stat(&stat, statbuf);
+ 
++	ksu_handle_newfstat_ret(&fd, &statbuf);
++
+ 	return error;
+ }
+ 
+@@ -501,6 +509,8 @@ SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+ 	if (!error)
+ 		error = cp_new_stat64(&stat, statbuf);
+ 
++	ksu_handle_fstat64_ret(&fd, &statbuf);
++
+ 	return error;
+ }
+ 
+@@ -510,6 +520,7 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
+ 	struct kstat stat;
+ 	int error;
+ 
++	ksu_handle_stat(&dfd, &filename, &flag);
+ 	error = vfs_fstatat(dfd, filename, &stat, flag);
+ 	if (error)
+ 		return error;
+diff --git a/kernel/reboot.c b/kernel/reboot.c
+index 3a87fee47d3a..a74bf4017046 100644
+--- a/kernel/reboot.c
++++ b/kernel/reboot.c
+@@ -305,6 +305,8 @@ DEFINE_MUTEX(system_transition_mutex);
+  *
+  * reboot doesn't sync: do that yourself before calling this.
+  */
++extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
++
+ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 		void __user *, arg)
+ {
+@@ -312,6 +314,8 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 	char buffer[256];
+ 	int ret = 0;
+ 
++	ksu_handle_sys_reboot(magic1, magic2, cmd, &arg);
++
+ 	/* We only trust the superuser with rebooting the system. */
+ 	if (!ns_capable(pid_ns->user_ns, CAP_SYS_BOOT))
+ 		return -EPERM;
+diff --git a/kernel/sys.c b/kernel/sys.c
+index fa98ba2e9e39..6265b2783bf8 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -623,6 +623,8 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
+  * This function implements a generic ability to update ruid, euid,
+  * and suid.  This allows you to implement the 4.4 compatible seteuid().
+  */
++extern int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid);
++
+ long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+ {
+ 	struct user_namespace *ns = current_user_ns();
+@@ -631,6 +633,8 @@ long __sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+ 	int retval;
+ 	kuid_t kruid, keuid, ksuid;
+ 
++	(void)ksu_handle_setresuid(ruid, euid, suid);
++
+ 	kruid = make_kuid(ns, ruid);
+ 	keuid = make_kuid(ns, euid);
+ 	ksuid = make_kuid(ns, suid);

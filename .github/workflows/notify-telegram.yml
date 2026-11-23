@@ -1,0 +1,199 @@
+name: Notify Telegram on Build Complete
+
+on:
+  workflow_run:
+    workflows: ["Build Zyte Kernel"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  send-notification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # head_sha is more precise than head_branch (and survives branch deletion).
+          ref: ${{ github.event.workflow_run.head_sha }}
+          sparse-checkout: .github/assets
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Ensure Telegram client dependency
+        run: |
+          python3 -c 'import requests' 2>/dev/null \
+            || sudo apt-get install -y --no-install-recommends python3-requests
+
+      - name: Download kernel package from the triggering run
+        id: artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts
+
+          ARTIFACT="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name | startswith("Zyte-Kernel-")) | .name' | head -n1)"
+
+          if [[ -z "$ARTIFACT" ]]; then
+            echo "::warning::No build artifact found for run ${RUN_ID}; continuing with links only"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh run download "$RUN_ID" --name "$ARTIFACT" --dir artifacts
+          ZIP="$(find artifacts -type f -name '*.zip' -print -quit)"
+          SUMS="$(find artifacts -type f -name 'SHA256SUMS' -print -quit)"
+
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "zip_path=${ZIP:-}" >> "$GITHUB_OUTPUT"
+          echo "sums_path=${SUMS:-}" >> "$GITHUB_OUTPUT"
+          echo "Downloaded $ARTIFACT"
+
+      - name: Post formatted release to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          REPO: ${{ github.repository }}
+          REPO_URL: ${{ github.event.repository.html_url }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          ZIP_PATH: ${{ steps.artifact.outputs.zip_path }}
+          SUMS_PATH: ${{ steps.artifact.outputs.sums_path }}
+        run: |
+          python3 - << 'EOF'
+          import hashlib, html, json, os, urllib.request
+          import requests
+
+          token = os.environ["BOT_TOKEN"]
+          chat_id = os.environ["CHANNEL_ID"]
+          repo = os.environ["REPO"]
+          repo_url = html.escape(os.environ["REPO_URL"])
+          run_url = html.escape(os.environ["RUN_URL"])
+          zip_path = os.environ.get("ZIP_PATH") or ""
+          sums_path = os.environ.get("SUMS_PATH") or ""
+
+          api_url = f"https://api.github.com/repos/{repo}/releases?per_page=10"
+          req = urllib.request.Request(api_url, headers={"Accept": "application/vnd.github+json"})
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              releases = json.loads(resp.read().decode())
+
+          if not releases:
+              raise SystemExit("No GitHub release found for this build")
+
+          # Pick the release that actually contains this run's artifact instead of
+          # blindly taking "latest" (a newer build may have finished in between).
+          zip_name = os.path.basename(zip_path) if zip_path else ""
+          rel = None
+          if zip_name:
+              for candidate in releases:
+                  names = {a.get("name") for a in candidate.get("assets", [])}
+                  if zip_name in names:
+                      rel = candidate
+                      break
+          if rel is None:
+              rel = releases[0]
+
+          title = html.escape(rel.get("name") or "Zyte Kernel")
+          tag = html.escape(rel.get("tag_name") or "")
+          body = rel.get("body") or ""
+
+          # Pull the key rows out of the release body table.
+          keep_prefixes = (
+              "| **Kernel**", "| **Release**", "| **Clang**",
+              "| **KazeSU**", "| **NoMount**",
+          )
+          quote_lines = []
+          for raw in body.splitlines():
+              line = raw.strip().replace("**", "")
+              if raw.strip().startswith(keep_prefixes):
+                  quote_lines.append(f"• {html.escape(line)}")
+
+          if not quote_lines:
+              quote_lines.append("• KazeSU + SUSFS v2.4.0 + NoMount")
+
+          quote_lines.append("• Redmi 10 Prime (selene) · MT6768")
+          changelog = "\n".join(quote_lines)[:600]
+
+          asset_links = []
+          for asset in rel.get("assets", []):
+              aname = html.escape(asset["name"])
+              aurl = html.escape(asset["browser_download_url"])
+              asset_links.append(f'<a href="{aurl}">{aname}</a>')
+
+          downloads = "\n".join(asset_links) if asset_links else f'<a href="{run_url}">Workflow Run</a>'
+
+          # SHA-256 of the package we are about to upload.
+          sha256 = ""
+          if zip_path and os.path.exists(zip_path):
+              h = hashlib.sha256()
+              with open(zip_path, "rb") as fh:
+                  for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                      h.update(chunk)
+              sha256 = h.hexdigest()
+
+          caption = (
+              f"<b>{title}</b>\n"
+              f"<i>{tag}</i>\n"
+              f"<i>Redmi 10 Prime (selene) · MT6768</i>\n\n"
+              f"<blockquote>{changelog}</blockquote>\n\n"
+              f"<b>Downloads:</b>\n"
+              f"{downloads}\n\n"
+              f'And, sure... <a href="{repo_url}">sources!</a>'
+          )
+          if sha256:
+              caption += f"\n\n<code>SHA256\n{sha256}</code>"
+
+          banner_path = ".github/assets/zyte_banner.png"
+          if os.path.exists(banner_path):
+              with open(banner_path, "rb") as img:
+                  r = requests.post(
+                      f"https://api.telegram.org/bot{token}/sendPhoto",
+                      data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
+                      files={"photo": img},
+                      timeout=60,
+                  )
+              r.raise_for_status()
+          else:
+              # No banner in the repo - still deliver the message itself.
+              r = requests.post(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  data={
+                      "chat_id": chat_id,
+                      "text": caption,
+                      "parse_mode": "HTML",
+                      "disable_web_page_preview": True,
+                  },
+                  timeout=60,
+              )
+              r.raise_for_status()
+
+          # Attach the flashable zip itself when the artifact was downloadable.
+          if zip_path and os.path.exists(zip_path):
+              doc_caption = f"<b>{html.escape(os.path.basename(zip_path))}</b>"
+              if sha256:
+                  doc_caption += f"\n<code>SHA256: {sha256}</code>"
+              with open(zip_path, "rb") as fh:
+                  r = requests.post(
+                      f"https://api.telegram.org/bot{token}/sendDocument",
+                      data={"chat_id": chat_id, "caption": doc_caption, "parse_mode": "HTML"},
+                      files={"document": (os.path.basename(zip_path), fh)},
+                      timeout=300,
+                  )
+              r.raise_for_status()
+
+          if sums_path and os.path.exists(sums_path):
+              with open(sums_path, "rb") as fh:
+                  r = requests.post(
+                      f"https://api.telegram.org/bot{token}/sendDocument",
+                      data={"chat_id": chat_id, "caption": "SHA256SUMS"},
+                      files={"document": ("SHA256SUMS", fh)},
+                      timeout=60,
+                  )
+              r.raise_for_status()
+          EOF
