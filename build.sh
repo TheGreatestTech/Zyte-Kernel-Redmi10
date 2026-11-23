@@ -221,8 +221,9 @@ usage() {
     -r, --reconfig         Regenerate .config from vendor/mt6768_defconfig + vendor/selene.config
     -m, --menuconfig       Open menuconfig before building
         --no-zip           Do not create the AnyKernel3 flashable zip
-        --variant V        base (no integration), kazesu (root only, manual hook)
-                         or all-in-one (root + SUSFS + NoMount, default)
+        --variant V        base (no integration), root (root only, manual hook),
+                         root-nomount (root + NoMount) or all-in-one
+                         (root + SUSFS + NoMount, default)
         --root R           bakasu (default) or kazesu - which root implementation
     -v, --verbose          Stream raw make output instead of the live status line
         --load-limit N     Limit make load average (0 = no limit, default: 0)
@@ -329,9 +330,12 @@ done
 [[ "$JOBS" =~ ^[0-9]+$ ]] && (( JOBS > 0 )) || die "Invalid job count: $JOBS"
 
 case "$BUILD_VARIANT" in
-    base|all-in-one|kazesu) ;;
-    *) die "Unknown variant: $BUILD_VARIANT (use base, all-in-one or kazesu)" ;;
+    base|all-in-one|kazesu|root|root-nomount) ;;
+    *) die "Unknown variant: $BUILD_VARIANT (use base, kazesu, root-nomount or all-in-one)" ;;
 esac
+
+# "kazesu" is the old name for the root-only variant
+[[ "$BUILD_VARIANT" == "kazesu" ]] && BUILD_VARIANT="root"
 
 case "$ROOT_IMPL" in
     kazesu|bakasu) ;;
@@ -407,13 +411,13 @@ preflight() {
             || die "KazeSU not integrated (run --ci-integrate first)"
         [[ -f "$SRC/fs/susfs.c" ]] \
             || die "SUSFS not integrated (run --ci-integrate first)"
-    elif [[ "$BUILD_VARIANT" == "kazesu" ]]; then
+    elif [[ "$BUILD_VARIANT" == "root" || "$BUILD_VARIANT" == "root-nomount" ]]; then
         [[ -e "$SRC/drivers/kernelsu/Kconfig" ]] \
-            || die "KazeSU not integrated (run --ci-integrate first)"
+            || die "$ROOT_IMPL not integrated (run --ci-integrate first)"
         grep -q 'ksu_handle_execveat' "$SRC/fs/exec.c" \
             || die "KazeSU manual hooks not integrated (run --ci-integrate first)"
         grep -q 'ksu_handle_newfstat_ret' "$SRC/fs/stat.c" \
-            || die "KazeSU manual hooks not integrated (run --ci-integrate first)"
+            || die "$ROOT_IMPL manual hooks not integrated (run --ci-integrate first)"
     fi
 
     export PATH="$TC/bin:$PATH"
@@ -717,7 +721,13 @@ verify_integration() {
             || die "$ROOT_IMPL stat handler is not the manual-hook variant"
         grep -q '^config KSU_MANUAL_HOOK$' "$ROOT_DIR/kernel/Kconfig" \
             || die "$ROOT_IMPL manual hook Kconfig entry missing"
-        ok "All $ROOT_IMPL manual hook call sites present (no SUSFS, no NoMount)"
+        if [[ "$BUILD_VARIANT" == "root-nomount" ]]; then
+            [[ -e "$SRC/fs/nomount/Kconfig" ]] \
+                || die 'NoMount was not integrated'
+            ok "All $ROOT_IMPL manual hook call sites + NoMount present (no SUSFS)"
+        else
+            ok "All $ROOT_IMPL manual hook call sites present (no SUSFS, no NoMount)"
+        fi
     fi
 
     KAZESU_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
@@ -755,9 +765,10 @@ ci_integrate() {
             integrate_nomount
             verify_integration
             ;;
-        kazesu)
+        root|root-nomount)
             integrate_root
             integrate_manual_hooks
+            [[ "$BUILD_VARIANT" == "root-nomount" ]] && integrate_nomount
             verify_integration
             ;;
     esac
@@ -827,8 +838,9 @@ apply_variant_config() {
         # Logging stays off by choice; it can still be enabled at runtime.
         config_toggle disable KSU_SUSFS_ENABLE_LOG
         (( has_nomount )) && config_toggle enable NOMOUNT
-    elif [[ "$BUILD_VARIANT" == "kazesu" ]]; then
-        # KazeSU only: manual hook mode, no SUSFS kernel module, no NoMount.
+    elif [[ "$BUILD_VARIANT" == "root" || "$BUILD_VARIANT" == "root-nomount" ]]; then
+        # Root only: manual hook mode, no SUSFS kernel module.
+        # root-nomount additionally enables NoMount.
         for symbol in "${ksu_symbols[@]}"; do
             config_toggle disable "$symbol"
         done
@@ -842,7 +854,11 @@ apply_variant_config() {
         config_toggle disable KSU_MANUAL_HOOK_AUTO_INPUT_HOOK
         config_toggle disable KSU_TRACEPOINT_HOOK
         config_toggle disable KSU_TAMPER_SYSCALL_TABLE
-        config_toggle disable NOMOUNT
+        if [[ "$BUILD_VARIANT" == "root-nomount" ]] && (( has_nomount )); then
+            config_toggle enable NOMOUNT
+        else
+            config_toggle disable NOMOUNT
+        fi
     else
         for symbol in "${manual_symbols[@]}"; do
             config_toggle disable "$symbol"
@@ -873,20 +889,30 @@ apply_variant_config() {
         grep -qx "# CONFIG_KSU_SUSFS_ENABLE_LOG is not set" "$OUT/.config" \
             || build_failed "SUSFS logging must stay off in the all-in-one config"
         ok "KazeSU SUSFS inline hooks + SUSFS v2.4.0$( (( has_nomount )) && echo ' + NoMount') enabled"
-    elif [[ "$BUILD_VARIANT" == "kazesu" ]]; then
+    elif [[ "$BUILD_VARIANT" == "root" || "$BUILD_VARIANT" == "root-nomount" ]]; then
         for symbol in KSU KSU_MANUAL_HOOK; do
             grep -qx "CONFIG_${symbol}=y" "$OUT/.config" \
                 || build_failed "Required kazesu option CONFIG_${symbol} did not enable"
         done
         # Symbols that are absent from .config (no Kconfig entry at all) are
         # fine too - only "=y" is a failure.
-        for symbol in KSU_SUSFS NOMOUNT \
+        for symbol in KSU_SUSFS \
                       KSU_MANUAL_HOOK_AUTO_SETUID_HOOK KSU_MANUAL_HOOK_AUTO_INITRC_HOOK \
                       KSU_MANUAL_HOOK_AUTO_INPUT_HOOK; do
             grep -qx "CONFIG_${symbol}=y" "$OUT/.config" \
-                && build_failed "kazesu variant must not select CONFIG_${symbol}"
+                && build_failed "$BUILD_VARIANT variant must not select CONFIG_${symbol}"
         done
-        ok "$ROOT_IMPL manual hook enabled (no SUSFS, no NoMount)"
+        if [[ "$BUILD_VARIANT" == "root-nomount" ]]; then
+            if (( has_nomount )); then
+                grep -qx "CONFIG_NOMOUNT=y" "$OUT/.config" \
+                    || build_failed "Required root-nomount option CONFIG_NOMOUNT did not enable"
+            fi
+            ok "$ROOT_IMPL manual hook + NoMount enabled (no SUSFS)"
+        else
+            grep -qx "CONFIG_NOMOUNT=y" "$OUT/.config" \
+                && build_failed "root variant must not select CONFIG_NOMOUNT"
+            ok "$ROOT_IMPL manual hook enabled (no SUSFS, no NoMount)"
+        fi
     else
         grep -q '^CONFIG_KSU=y' "$OUT/.config" \
             && build_failed "Base variant must not enable CONFIG_KSU"
