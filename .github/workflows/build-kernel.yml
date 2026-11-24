@@ -185,10 +185,12 @@ jobs:
 
       - name: Cache compiler objects
         uses: hendrikmuhs/ccache-action@v1.2
+        # A broken/missing cache must never fail the build - it only costs time.
+        continue-on-error: true
         with:
           key: zyte-selene-${{ runner.os }}-${{ steps.neutron.outputs.tag }}-${{ env.KERNEL_COMMIT }}
           max-size: 5G
-          variant: main
+          variant: ccache
 
       - name: Checkout selene AnyKernel3 template
         uses: actions/checkout@v4
