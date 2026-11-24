@@ -39,14 +39,6 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - name: Read release version
-        id: version
-        run: |
-          set -Eeuo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo unknown)"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Zyte Kernel v$VERSION"
-
       - name: Ensure Telegram client dependency
         run: |
           python3 -c 'import requests' 2>/dev/null \
@@ -74,10 +66,20 @@ jobs:
           ZIP="$(find artifacts -type f -name '*.zip' -print -quit)"
           SUMS="$(find artifacts -type f -name 'SHA256SUMS' -print -quit)"
 
+          # The zip name carries the release version (…-v1.0.1-<stamp>.zip).
+          # Prefer it over the VERSION file: the build run bumped the version
+          # after it checked the repo out, so the file here is one bump behind.
+          VERSION=""
+          if [[ -n "$ZIP" ]]; then
+            VERSION="$(basename "$ZIP" | sed -n 's/.*-v\([0-9][0-9.]*\)-[0-9]\{8\}-[0-9]\{4\}.*/\1/p')"
+          fi
+          [[ -n "$VERSION" ]] || VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo unknown)"
+
           echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "zip_path=${ZIP:-}" >> "$GITHUB_OUTPUT"
           echo "sums_path=${SUMS:-}" >> "$GITHUB_OUTPUT"
-          echo "Downloaded $ARTIFACT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Downloaded $ARTIFACT (version v$VERSION)"
 
       - name: Post formatted release to Telegram
         env:
@@ -86,7 +88,7 @@ jobs:
           REPO: ${{ github.repository }}
           REPO_URL: ${{ github.event.repository.html_url }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.artifact.outputs.version }}
           ZIP_PATH: ${{ steps.artifact.outputs.zip_path }}
           SUMS_PATH: ${{ steps.artifact.outputs.sums_path }}
         run: |

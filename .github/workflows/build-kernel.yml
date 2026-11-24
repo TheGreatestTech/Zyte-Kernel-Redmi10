@@ -23,6 +23,16 @@ on:
           - root-nomount
           - kazesu
           - base
+      version_bump:
+        description: 'Version bump applied before this build'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - none
   schedule:
     - cron: '0 0 * * 0'
 
@@ -59,6 +69,29 @@ jobs:
         run: |
           set -Eeuo pipefail
           echo "BUILD_DATE=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_ENV"
+
+      - name: Bump version
+        run: |
+          set -Eeuo pipefail
+          bash scripts/bump-version.sh "${{ inputs.version_bump || 'patch' }}"
+
+          if git diff --quiet -- VERSION; then
+            echo "Version unchanged (bump: ${{ inputs.version_bump || 'patch' }})"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
+          git add VERSION
+          git commit -m "chore: bump version to v$NEW_VERSION"
+
+          BRANCH="${{ github.ref_name }}"
+          if ! git push origin "HEAD:$BRANCH"; then
+            echo "::warning::Could not push the version bump to $BRANCH (another run may have bumped it)"
+          else
+            echo "Pushed version v$NEW_VERSION to $BRANCH"
+          fi
 
       - name: Free runner disk space
         uses: jlumbroso/free-disk-space@main
