@@ -189,20 +189,34 @@ index ec2d20ddd766..806e4356d775 100644
  }
  
 diff --git a/fs/stat.c b/fs/stat.c
-index 48ccb9111d67..dce69a84d176 100644
+index 48ccb9111d67..b97a629fc585 100644
 --- a/fs/stat.c
 +++ b/fs/stat.c
-@@ -20,6 +20,9 @@
+@@ -20,6 +20,11 @@
  
  #include <linux/uaccess.h>
  #include <asm/unistd.h>
 +#ifdef CONFIG_KSU_SUSFS
 +#include <linux/susfs_def.h>
++extern struct static_key_true ksu_is_init_rc_hook_enabled;
++extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);
 +#endif
  
  #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
  extern bool susfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);
-@@ -213,12 +216,23 @@ EXPORT_SYMBOL(vfs_statx_fd);
+@@ -192,6 +197,11 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
+ 	if (f.file) {
+ 		error = vfs_getattr(&f.file->f_path, stat,
+ 				    request_mask, query_flags);
++#ifdef CONFIG_KSU_SUSFS
++		/* conceal the init.rc size (SUSFS inline hook) */
++		if (static_branch_unlikely(&ksu_is_init_rc_hook_enabled))
++			ksu_handle_vfs_fstat(fd, &stat->size);
++#endif
+ 		fdput(f);
+ 	}
+ 	return error;
+@@ -213,12 +223,23 @@ EXPORT_SYMBOL(vfs_statx_fd);
   *
   * 0 will be returned on success, and a -ve error code if unsuccessful.
   */
@@ -226,7 +240,7 @@ index 48ccb9111d67..dce69a84d176 100644
  
  	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
  		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
-@@ -232,7 +246,22 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+@@ -232,7 +253,22 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
  		lookup_flags |= LOOKUP_EMPTY;
  
  retry:

@@ -595,39 +595,36 @@ integrate_susfs() {
     local susfs_patch="$ROOT/patches/susfs_patch_to_4.19.selene.patch"
     [[ -f "$susfs_patch" ]] || die "Missing SUSFS patch: $susfs_patch"
 
-    if [[ -f fs/susfs.c ]] \
-        && grep -q 'SUSFS_VERSION "v2.4.0"' include/linux/susfs.h 2>/dev/null \
-        && grep -q 'susfs_init' fs/susfs.c \
-        && grep -q 'susfs_get_non_sus_mnt_id_from_mnt' fs/namespace.c; then
+    # A patch is "already applied" only if it can be reversed cleanly -
+    # that catches partially applied trees that a symbol grep would miss.
+    if git apply --reverse --check --recount --whitespace=nowarn "$susfs_patch" 2>/dev/null; then
         info "SUSFS v2.4.0 already integrated"
     else
         # Drop artifacts from older/broken integrations so the patch applies.
         rm -rf fs/susfs fs/susfs.c include/linux/susfs.h include/linux/susfs_def.h
-        git apply --recount --whitespace=nowarn "$susfs_patch" \
+        git apply --check --recount --whitespace=nowarn "$susfs_patch" 2>/dev/null \
             || die "Failed to apply SUSFS patch to $SRC (tree does not match patches/; regenerate the patch against this kernel commit, or run: $0 --reset)"
+        git apply --recount --whitespace=nowarn "$susfs_patch" \
+            || die "Failed to apply SUSFS patch to $SRC"
         ok "SUSFS v2.4.0 kernel patch applied"
     fi
 }
 
 integrate_inline_hooks() {
-    info "[3/4] Adding KazeSU SUSFS inline hooks"
+    info "[3/4] Adding SUSFS inline hooks"
     cd "$SRC"
 
-    local hooks_patch="$ROOT/patches/kazesu_hooks_4.19.selene.patch"
-    [[ -f "$hooks_patch" ]] || die "Missing KazeSU hooks patch: $hooks_patch"
+    local hooks_patch="$ROOT/patches/susfs_inline_hooks_4.19.selene.patch"
+    [[ -f "$hooks_patch" ]] || die "Missing SUSFS inline hooks patch: $hooks_patch"
 
-    if grep -q 'ksu_handle_setresuid' kernel/sys.c \
-        && grep -q 'ksu_handle_execveat' fs/exec.c \
-        && grep -q 'ksu_handle_faccessat' fs/open.c \
-        && grep -q 'ksu_handle_sys_read' fs/read_write.c \
-        && grep -q 'ksu_handle_stat' fs/stat.c \
-        && grep -q 'ksu_handle_sys_reboot' kernel/reboot.c \
-        && grep -q 'ksu_handle_input_handle_event' drivers/input/input.c; then
-        info "KazeSU inline hooks already present"
+    if git apply --reverse --check --recount --whitespace=nowarn "$hooks_patch" 2>/dev/null; then
+        info "SUSFS inline hooks already present"
     else
+        git apply --check --recount --whitespace=nowarn "$hooks_patch" 2>/dev/null \
+            || die "Failed to apply SUSFS inline hooks patch (tree mismatch; run: $0 --reset)"
         git apply --recount --whitespace=nowarn "$hooks_patch" \
-            || die 'Failed to apply KazeSU hooks patch'
-        ok "KazeSU inline hooks applied"
+            || die "Failed to apply SUSFS inline hooks patch"
+        ok "SUSFS inline hooks applied"
     fi
 }
 
@@ -638,16 +635,11 @@ integrate_manual_hooks() {
     local hooks_patch="$ROOT/patches/bakasu_manual_hooks_4.19.selene.patch"
     [[ -f "$hooks_patch" ]] || die "Missing $ROOT_IMPL manual hooks patch: $hooks_patch"
 
-    if grep -q 'ksu_handle_setresuid' kernel/sys.c \
-        && grep -q 'ksu_handle_execveat' fs/exec.c \
-        && grep -q 'ksu_handle_faccessat' fs/open.c \
-        && grep -q 'ksu_handle_sys_read' fs/read_write.c \
-        && grep -q 'ksu_handle_stat' fs/stat.c \
-        && grep -q 'ksu_handle_newfstat_ret' fs/stat.c \
-        && grep -q 'ksu_handle_sys_reboot' kernel/reboot.c \
-        && grep -q 'ksu_handle_input_handle_event' drivers/input/input.c; then
+    if git apply --reverse --check --recount --whitespace=nowarn "$hooks_patch" 2>/dev/null; then
         info "$ROOT_IMPL manual hooks already present"
     else
+        git apply --check --recount --whitespace=nowarn "$hooks_patch" 2>/dev/null \
+            || die "Failed to apply $ROOT_IMPL manual hooks patch (tree mismatch; run: $0 --reset)"
         git apply --recount --whitespace=nowarn "$hooks_patch" \
             || die "Failed to apply $ROOT_IMPL manual hooks patch"
         ok "$ROOT_IMPL manual hooks applied"
@@ -705,9 +697,11 @@ verify_integration() {
             || die "$ROOT_IMPL stat handler is not the SUSFS filename variant"
         grep -q 'ksu_handle_post_execveat_sucompat' "$SRC/fs/exec.c" \
             || die 'post-execve hook is missing from fs/exec.c'
+        grep -q 'ksu_handle_vfs_fstat' "$SRC/fs/stat.c" \
+            || die 'ksu_handle_vfs_fstat hook is missing from fs/stat.c'
         grep -q '^config KSU_SUSFS$' "$ROOT_DIR/kernel/Kconfig" \
             || die "$ROOT_IMPL SUSFS Kconfig entry missing"
-        ok "All seven $ROOT_IMPL inline hooks and SUSFS v2.4.0 wiring present"
+        ok "All $ROOT_IMPL inline hooks (incl. ksu_handle_vfs_fstat) and SUSFS v2.4.0 wiring present"
     else
         grep -q 'ksu_handle_newfstat_ret' "$SRC/fs/stat.c" \
             || die 'newfstat hook is missing from fs/stat.c'
@@ -888,7 +882,7 @@ apply_variant_config() {
         }
         grep -qx "# CONFIG_KSU_SUSFS_ENABLE_LOG is not set" "$OUT/.config" \
             || build_failed "SUSFS logging must stay off in the all-in-one config"
-        ok "KazeSU SUSFS inline hooks + SUSFS v2.4.0$( (( has_nomount )) && echo ' + NoMount') enabled"
+        ok "$ROOT_IMPL SUSFS inline hooks + SUSFS v2.4.0$( (( has_nomount )) && echo ' + NoMount') enabled"
     elif [[ "$BUILD_VARIANT" == "root" || "$BUILD_VARIANT" == "root-nomount" ]]; then
         for symbol in KSU KSU_MANUAL_HOOK; do
             grep -qx "CONFIG_${symbol}=y" "$OUT/.config" \

@@ -16,3 +16,4 @@
 
 # Local build logs
 /.build-logs/
+/.worktrees/
