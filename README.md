@@ -2,6 +2,8 @@
 
 Automated build repository for the **Redmi 10 Prime (selene / MT6768)** kernel.
 
+**Current release: `v1.0`** — see the [`VERSION`](VERSION) file (bump it there).
+
 This repo contains **only the build tooling**. The kernel sources live in
 [`TheGreatestTech/MT6768-Kernel-4.19`](https://github.com/TheGreatestTech/MT6768-Kernel-4.19)
 and are cloned + patched at build time, so the kernel tree always stays pristine.
@@ -23,6 +25,7 @@ and are cloned + patched at build time, so the kernel tree always stays pristine
 | SUSFS | v2.4.0 kernel side (`all-in-one` variant only) |
 | NoMount | `maxsteeel/nomount` (`all-in-one` variant only) |
 | Toolchain | Neutron Clang (downloaded automatically) |
+| Version | `v1.0` (from the `VERSION` file; ends up in `uname -r`, the zip name, the GitHub release and Telegram) |
 | Packaging | [AnyKernel3-selene](https://github.com/TheGreatestTech/AnyKernel3-selene) |
 
 ## Build it locally

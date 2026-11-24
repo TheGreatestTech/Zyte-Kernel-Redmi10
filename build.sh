@@ -17,6 +17,16 @@ AK3="${ANYKERNEL_DIR:-$ROOT/Zyte-Kernel}"
 TC="${TOOLCHAIN_DIR:-$ROOT/toolchains/neutron-clang}"
 LOG="$OUT/build.log"
 
+# Zyte release version (see the VERSION file). Bump it there; it ends up in
+# the kernel release string, the zip name, the GitHub release and Telegram.
+ZYTE_VERSION="${ZYTE_VERSION:-}"
+if [[ -z "$ZYTE_VERSION" && -f "$ROOT/VERSION" ]]; then
+    ZYTE_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+fi
+[[ "$ZYTE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
+    || die "Invalid VERSION '$ZYTE_VERSION' (expected e.g. 1.0 or 1.0.1)"
+ZYTE_VERSION_TAG="v$ZYTE_VERSION"
+
 ARCH="arm64"
 DEFCONFIG="vendor/mt6768_defconfig"
 FRAGMENT_REL="vendor/selene.config"
@@ -215,6 +225,8 @@ usage() {
 
   Usage: ./build.sh [options]
 
+  Version: v$ZYTE_VERSION  (edit the VERSION file to bump it)
+
   Options:
     -j, --jobs N           Parallel jobs (default: $(nproc 2>/dev/null || echo 4))
     -c, --clean            Delete out/ and do a clean rebuild
@@ -294,6 +306,10 @@ while (($#)); do
         --load-limit=*)
             MAKE_LOAD_LIMIT="${1#*=}"
             shift
+            ;;
+        --version)
+            echo "Zyte Kernel v$ZYTE_VERSION"
+            exit 0
             ;;
         -h|--help)
             usage
@@ -422,6 +438,12 @@ preflight() {
 
     export PATH="$TC/bin:$PATH"
     export ARCH="$ARCH"
+    # Appends the Zyte version to the kernel release string (uname -r).
+    export LOCALVERSION="-$ZYTE_VERSION_TAG"
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+        echo "ZYTE_VERSION=$ZYTE_VERSION" >> "$GITHUB_ENV"
+        echo "ZYTE_VERSION_TAG=$ZYTE_VERSION_TAG" >> "$GITHUB_ENV"
+    fi
     export LLVM=1
     export LLVM_IAS=1
     export CROSS_COMPILE="aarch64-linux-gnu-"
@@ -1101,6 +1123,7 @@ package_anykernel() {
     local stamp base
     stamp="$(date +%Y%m%d-%H%M)"
     base="${KERNEL_RELEASE}"
+    [[ "$base" == *"-$ZYTE_VERSION_TAG" ]] || base="$base-$ZYTE_VERSION_TAG"
     ZIP="$OUT/Zyte-Kernel-${BUILD_VARIANT}-${base}-${stamp}.zip"
     rm -f "$ZIP"
 
@@ -1183,6 +1206,7 @@ success_screen() {
 
     # Calculate dynamic width based on longest line
     local kernel_str="$KERNEL_RELEASE"
+    [[ "$kernel_str" == *"-$ZYTE_VERSION_TAG" ]] || kernel_str="$kernel_str-$ZYTE_VERSION_TAG"
     local min_width=50
     local max_width=80
     local str_width=${#kernel_str}
@@ -1261,6 +1285,7 @@ row "Target" "Redmi 10 Prime (selene) · MT6768"
 row "Source" "$GIT_BRANCH @ $GIT_COMMIT$GIT_DIRTY"
 row "Config" "$DEFCONFIG + $FRAGMENT_REL"
 row "Variant" "$BUILD_VARIANT"
+row "Version" "$ZYTE_VERSION_TAG"
 row "Toolchain" "$COMPILER"
 row "Output" "out/"
 row "Jobs" "$JOBS"

@@ -216,7 +216,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Zyte-Kernel-${{ env.BUILD_DATE }}
+          name: Zyte-Kernel-v${{ env.ZYTE_VERSION }}-${{ env.BUILD_DATE }}
           path: |
             releases/*.zip
             releases/SHA256SUMS
@@ -227,18 +227,19 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: zyte-kernel-${{ env.BUILD_DATE }}
-          name: Zyte Kernel Build - ${{ env.BUILD_DATE }}
+          tag_name: zyte-kernel-v${{ env.ZYTE_VERSION }}-${{ env.BUILD_DATE }}
+          name: Zyte Kernel v${{ env.ZYTE_VERSION }} - ${{ env.BUILD_DATE }}
           target_commitish: ${{ github.sha }}
           body: |
-            # 🎯 Zyte Kernel Build for Redmi 10 Prime (selene / MT6768)
+            # 🎯 Zyte Kernel **v${{ env.ZYTE_VERSION }}** for Redmi 10 Prime (selene / MT6768)
 
-            Automated kernel build with **BakaSU** (manual hook) + optional **SUSFS v2.4.0** + **NoMount**.
+            Automated kernel build with **BakaSU** + optional **SUSFS v2.4.0** + **NoMount**.
 
             ---
             ### 📦 Source & Toolchain
             | Component | Version |
             |-----------|---------|
+            | **Version** | `v${{ env.ZYTE_VERSION }}` |
             | **Kernel** | `${{ env.KERNEL_COMMIT }}` (LineageOS 24.0, 4.19.325) |
             | **Release** | `${{ env.KERNEL_RELEASE }}` |
             | **Clang** | `${{ steps.neutron.outputs.tag }}` (Neutron Toolchains) |

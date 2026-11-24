@@ -15,6 +15,21 @@ jobs:
     timeout-minutes: 20
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
+      - name: Check Telegram secrets
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          [[ -n "$BOT_TOKEN" ]] || missing+=("TELEGRAM_BOT_TOKEN")
+          [[ -n "$CHANNEL_ID" ]] || missing+=("TELEGRAM_CHANNEL_ID")
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing repository secret(s): ${missing[*]}"
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -23,6 +38,14 @@ jobs:
           sparse-checkout: .github/assets
           sparse-checkout-cone-mode: false
           persist-credentials: false
+
+      - name: Read release version
+        id: version
+        run: |
+          set -Eeuo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo unknown)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Zyte Kernel v$VERSION"
 
       - name: Ensure Telegram client dependency
         run: |
@@ -63,6 +86,7 @@ jobs:
           REPO: ${{ github.repository }}
           REPO_URL: ${{ github.event.repository.html_url }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
+          VERSION: ${{ steps.version.outputs.version }}
           ZIP_PATH: ${{ steps.artifact.outputs.zip_path }}
           SUMS_PATH: ${{ steps.artifact.outputs.sums_path }}
         run: |
@@ -99,6 +123,7 @@ jobs:
           if rel is None:
               rel = releases[0]
 
+          version = os.environ.get("VERSION", "unknown")
           title = html.escape(rel.get("name") or "Zyte Kernel")
           tag = html.escape(rel.get("tag_name") or "")
           body = rel.get("body") or ""
@@ -117,6 +142,7 @@ jobs:
           if not quote_lines:
               quote_lines.append("• KazeSU + SUSFS v2.4.0 + NoMount")
 
+          quote_lines.append(f"• Zyte Kernel v{html.escape(version)}")
           quote_lines.append("• Redmi 10 Prime (selene) · MT6768")
           changelog = "\n".join(quote_lines)[:600]
 
@@ -139,6 +165,7 @@ jobs:
 
           caption = (
               f"<b>{title}</b>\n"
+              f"<i>Version: v{html.escape(version)}</i>\n"
               f"<i>{tag}</i>\n"
               f"<i>Redmi 10 Prime (selene) · MT6768</i>\n\n"
               f"<blockquote>{changelog}</blockquote>\n\n"
@@ -175,7 +202,8 @@ jobs:
 
           # Attach the flashable zip itself when the artifact was downloadable.
           if zip_path and os.path.exists(zip_path):
-              doc_caption = f"<b>{html.escape(os.path.basename(zip_path))}</b>"
+              doc_caption = (f"<b>Zyte Kernel v{html.escape(version)}</b>\n"
+                             f"{html.escape(os.path.basename(zip_path))}")
               if sha256:
                   doc_caption += f"\n<code>SHA256: {sha256}</code>"
               with open(zip_path, "rb") as fh:
