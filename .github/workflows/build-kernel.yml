@@ -16,11 +16,12 @@ on:
       variant:
         description: 'Kernel variant'
         required: false
-        default: 'kazesu'
+        default: 'all-in-one'
         type: choice
         options:
-          - kazesu
           - all-in-one
+          - root-nomount
+          - kazesu
           - base
   schedule:
     - cron: '0 0 * * 0'
@@ -39,12 +40,12 @@ env:
   # The kernel source is a separate repository; this repo only carries the
   # build script and the patches. Pin the ref so the patches always apply.
   KERNEL_REPO: 'https://github.com/TheGreatestTech/MT6768-Kernel-4.19.git'
-  KERNEL_BRANCH: 'lineage-24.0'
-  KERNEL_PIN: '1fbd52855444'
+  KERNEL_BRANCH: 'zyte/susfs'
+  KERNEL_PIN: '511f580114bf'
 
 jobs:
   build:
-    name: Build ${{ inputs.variant || 'kazesu' }}
+    name: Build ${{ inputs.variant || 'all-in-one' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -176,18 +177,18 @@ jobs:
       - name: Apply root/SUSFS/NoMount integration
         run: |
           set -Eeuo pipefail
-          bash ./build.sh --ci-integrate-only --variant "${{ inputs.variant || 'kazesu' }}"
+          bash ./build.sh --ci-integrate-only --variant "${{ inputs.variant || 'all-in-one' }}"
 
       - name: Build kernel
         env:
-          BUILD_VARIANT: ${{ inputs.variant || 'kazesu' }}
+          BUILD_VARIANT: ${{ inputs.variant || 'all-in-one' }}
           OUT_DIR: ${{ github.workspace }}/out
           TOOLCHAIN_DIR: ${{ github.workspace }}/toolchains/neutron-clang
           ANYKERNEL_DIR: ${{ github.workspace }}/Zyte-Kernel
           MAKE_LOAD_LIMIT: "2"
         run: |
           set -Eeuo pipefail
-          bash ./build.sh --clean --reconfig --variant "${{ inputs.variant || 'kazesu' }}"
+          bash ./build.sh --clean --reconfig --variant "${{ inputs.variant || 'all-in-one' }}"
 
           ZIP="$(find out -maxdepth 1 -type f -name 'Zyte-Kernel-*.zip' -print -quit)"
           [[ -n "$ZIP" && -s "$ZIP" ]] || {
@@ -247,7 +248,7 @@ jobs:
 
             ---
             ### 🏗️ Build Configuration
-            - **Variant:** `${{ inputs.variant || 'kazesu' }}`
+            - **Variant:** `${{ inputs.variant || 'all-in-one' }}`
             - **Root:** BakaSU (`CONFIG_KSU=y`, manual hook mode)
             - **SUSFS:** v2.4.0 (all-in-one only)
             - **Logging:** Disabled (`CONFIG_KSU_SUSFS_ENABLE_LOG` not set)

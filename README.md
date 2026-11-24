@@ -18,7 +18,7 @@ and are cloned + patched at build time, so the kernel tree always stays pristine
 
 | Component | Version |
 |-----------|---------|
-| Kernel | `MT6768-Kernel-4.19` @ `lineage-24.0` (4.19.325) |
+| Kernel | `MT6768-Kernel-4.19` @ `zyte/susfs` (4.19.325) |
 | Root | [BakaSU](https://github.com/Baka-SU/BakaSU) (`main`), manual hook mode |
 | SUSFS | v2.4.0 kernel side (`all-in-one` variant only) |
 | NoMount | `maxsteeel/nomount` (`all-in-one` variant only) |
@@ -29,7 +29,8 @@ and are cloned + patched at build time, so the kernel tree always stays pristine
 
 ```bash
 # clone the kernel next to this repo (or let CI do it)
-git clone --depth 1 https://github.com/TheGreatestTech/MT6768-Kernel-4.19.git source
+git clone --depth 1 --branch zyte/susfs \
+    https://github.com/TheGreatestTech/MT6768-Kernel-4.19.git source
 
 # root only (BakaSU, manual hooks)
 ./build.sh --ci-integrate --variant kazesu --clean --reconfig
@@ -72,7 +73,7 @@ alone.
 | `susfs_4.19_fixes.selene.patch` | fixes for the 9 hunks the generic SUSFS patch rejects on this tree (apply *after* it) |
 | `susfs_patch_to_4.19.selene.patch` | SUSFS v2.4.0 kernel side, adapted to this tree |
 | `susfs_patch_to_4.19.patch` | original upstream SUSFS patch, kept for reference - **not applied** |
-| `kazesu_hooks_4.19.selene.patch` | KazeSU SUSFS-inline hooks (only for `--root kazesu --variant all-in-one`) |
+| `susfs_inline_hooks_4.19.selene.patch` | the SUSFS-inline call sites BakaSU/KazeSU require (incl. `ksu_handle_vfs_fstat`) |
 
 `patches/susfs_4.19_fixes.selene.patch` is byte-identical to the reference
 `redmi_10_prime_los24_a17/susfs_fixed.patch` from
