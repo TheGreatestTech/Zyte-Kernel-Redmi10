@@ -120,12 +120,19 @@ jobs:
           mkdir -p source
           git -C source init -q
           git -C source remote add origin "$KERNEL_REPO"
-          if ! git -C source fetch --depth 1 origin "$REF"; then
-            echo "::warning::Could not fetch '$REF' directly, trying branch '$KERNEL_BRANCH'"
-            git -C source fetch --depth 1 origin "$KERNEL_BRANCH"
+
+          # GitHub refuses "git fetch <sha>" unless the server allows it, so a
+          # pinned commit is resolved from the branch history instead.
+          git -C source fetch --depth 200 origin "$KERNEL_BRANCH"
+          if git -C source rev-parse --verify --quiet "$REF^{commit}" >/dev/null; then
+            git -C source checkout -q --detach "$REF"
+            echo "Kernel: pinned to $REF"
+          elif git -C source rev-parse --verify --quiet FETCH_HEAD >/dev/null; then
             git -C source checkout -q --detach FETCH_HEAD
+            echo "::warning::'$REF' is not in '$KERNEL_BRANCH' - building the branch tip instead"
           else
-            git -C source checkout -q --detach FETCH_HEAD
+            echo "::error::Could not resolve '$REF' from '$KERNEL_BRANCH'"
+            exit 1
           fi
           test -f source/Makefile
           echo "KERNEL_COMMIT=$(git -C source rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
