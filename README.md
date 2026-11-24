@@ -20,7 +20,7 @@ and are cloned + patched at build time, so the kernel tree always stays pristine
 
 | Component | Version |
 |-----------|---------|
-| Kernel | `MT6768-Kernel-4.19` @ `zyte/susfs` (4.19.325) |
+| Kernel | `MT6768-Kernel-4.19` @ `lineage-24.0` (4.19.325) |
 | Root | [BakaSU](https://github.com/Baka-SU/BakaSU) (`main`), manual hook mode |
 | SUSFS | v2.4.0 kernel side (`all-in-one` variant only) |
 | NoMount | `maxsteeel/nomount` (`all-in-one` variant only) |
@@ -32,7 +32,7 @@ and are cloned + patched at build time, so the kernel tree always stays pristine
 
 ```bash
 # clone the kernel next to this repo (or let CI do it)
-git clone --depth 1 --branch zyte/susfs \
+git clone --depth 1 --branch lineage-24.0 \
     https://github.com/TheGreatestTech/MT6768-Kernel-4.19.git source
 
 # root only (BakaSU, manual hooks)
