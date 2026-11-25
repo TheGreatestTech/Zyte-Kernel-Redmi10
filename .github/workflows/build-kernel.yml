@@ -71,12 +71,24 @@ jobs:
           echo "BUILD_DATE=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_ENV"
 
       - name: Bump version
+        env:
+          BUMP_TYPE: ${{ inputs.version_bump || 'patch' }}
         run: |
           set -Eeuo pipefail
-          bash scripts/bump-version.sh "${{ inputs.version_bump || 'patch' }}"
+          OLD_VERSION="$(tr -d '[:space:]' < VERSION)"
+          echo "Current version: v$OLD_VERSION (bump type: $BUMP_TYPE)"
+
+          bash scripts/bump-version.sh "$BUMP_TYPE"
+          NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
+          echo "New version: v$NEW_VERSION"
+
+          if [[ "$BUMP_TYPE" != "none" && "$NEW_VERSION" == "$OLD_VERSION" ]]; then
+            echo "::error::Version bump did not change VERSION ($OLD_VERSION)"
+            exit 1
+          fi
 
           if git diff --quiet -- VERSION; then
-            echo "Version unchanged (bump: ${{ inputs.version_bump || 'patch' }})"
+            echo "Version unchanged on purpose (bump: $BUMP_TYPE)"
             exit 0
           fi
 
@@ -269,6 +281,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # Falls back to the built-in GITHUB_TOKEN. If the repository's
+          # workflow permissions are read-only, add a PAT as RELEASE_TOKEN.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
           tag_name: zyte-kernel-v${{ env.ZYTE_VERSION }}-${{ env.BUILD_DATE }}
           name: Zyte Kernel v${{ env.ZYTE_VERSION }} - ${{ env.BUILD_DATE }}
           target_commitish: ${{ github.sha }}
