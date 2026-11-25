@@ -1233,14 +1233,6 @@ package_anykernel() {
     cp -f "$KERNEL_IMAGE" "$STAGE_DIR/Image.gz-dtb"
     cp -f "$DTB" "$STAGE_DIR/dtb"
 
-    # Keep the flashable package's identity in sync with the artwork/banner.
-    if [[ -f "$STAGE_DIR/anykernel.sh" ]]; then
-        sed -i \
-            -e "s|^kernel\.string=.*|kernel.string=Zyte Kernel by TheGreatestTech1 for $DEVICE_NAME (selene)|" \
-            -e "s|^device\.name=.*|device.name1=selene|" \
-            "$STAGE_DIR/anykernel.sh"
-    fi
-
     local stamp base
     stamp="$(date +%Y%m%d-%H%M)"
     base="${KERNEL_RELEASE}"
