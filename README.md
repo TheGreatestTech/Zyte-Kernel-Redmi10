@@ -125,7 +125,8 @@ at once), the build still succeeds with a warning.
 5. publishes `Zyte-Kernel-*.zip` as a GitHub Release
 
 `workflow_dispatch` inputs: `neutron_tag` (compiler), `kernel_ref` (kernel branch/tag/commit),
-`variant` (`kazesu` / `all-in-one` / `base`).
+`variant` (`all-in-one` / `root-nomount` / `kazesu` / `base`), `version_bump`
+(`none` / `patch` / `minor` / `major`).
 
 `notify-telegram.yml` posts the banner, build details and the zip to Telegram after every
 successful build.
