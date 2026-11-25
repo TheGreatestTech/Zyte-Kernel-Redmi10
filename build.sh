@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  Zyte Kernel build script
-#  Device : Redmi 10 (selene) - MediaTek MT6768
+#  Device : Redmi 10 / 2022 / Prime (selene) - MediaTek MT6768
 #  Kernel : 4.19 (LineageOS 24.0 tree)
 # =============================================================================
 set -Eeuo pipefail
@@ -16,6 +16,10 @@ OUT="${OUT_DIR:-$ROOT/out}"
 AK3="${ANYKERNEL_DIR:-$ROOT/Zyte-Kernel}"
 TC="${TOOLCHAIN_DIR:-$ROOT/toolchains/neutron-clang}"
 LOG="$OUT/build.log"
+
+# Marketing name, kept in one place so the banner, the summary, the AnyKernel3
+# kernel.string and the release notes all agree with the artwork.
+DEVICE_NAME="Redmi 10 / 2022 / Prime"
 
 # Zyte release version (see the VERSION file). Bump it there; it ends up in
 # the kernel release string, the zip name, the GitHub release and Telegram.
@@ -125,7 +129,7 @@ banner() {
         gradient "  $line" "$CYN" "$BLU" "$MAUV"
         printf '\n'
     done
-    gradient "  Zyte Kernel  ·  Redmi 10 (selene)  ·  MediaTek MT6768  ·  Linux 4.19" "$GRY" "$SUB1" "$DIM"
+    gradient "  Zyte Kernel  ·  $DEVICE_NAME (selene)  ·  MediaTek MT6768  ·  Linux 4.19" "$GRY" "$SUB1" "$DIM"
     printf '\n'
     printf '  %s%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n' "$DIM" "$R"
 }
@@ -224,7 +228,7 @@ artifact() {
 usage() {
     cat <<EOF
 
-  Zyte Kernel build script - Redmi 10 (selene)
+  Zyte Kernel build script - Redmi 10 / 2022 / Prime (selene)
 
   Usage: ./build.sh [options]
 
@@ -1229,6 +1233,14 @@ package_anykernel() {
     cp -f "$KERNEL_IMAGE" "$STAGE_DIR/Image.gz-dtb"
     cp -f "$DTB" "$STAGE_DIR/dtb"
 
+    # Keep the flashable package's identity in sync with the artwork/banner.
+    if [[ -f "$STAGE_DIR/anykernel.sh" ]]; then
+        sed -i \
+            -e "s|^kernel\.string=.*|kernel.string=Zyte Kernel by TheGreatestTech1 for $DEVICE_NAME (selene)|" \
+            -e "s|^device\.name=.*|device.name1=selene|" \
+            "$STAGE_DIR/anykernel.sh"
+    fi
+
     local stamp base
     stamp="$(date +%Y%m%d-%H%M)"
     base="${KERNEL_RELEASE}"
@@ -1338,7 +1350,7 @@ success_screen() {
     printf '\n'
 
     # Info rows with icons
-    printf '  %s%s  %s%-14s%s %s\n' "$INF" "📱" "$DIM" "Device" "$R" "Redmi 10 (selene) · MT6768"
+    printf '  %s%s  %s%-14s%s %s\n' "$INF" "📱" "$DIM" "Device" "$R" "$DEVICE_NAME (selene) · MT6768"
     printf '  %s%s  %s%-14s%s %s\n' "$INF" "🌿" "$DIM" "Source" "$R" "$GIT_BRANCH @ $GIT_COMMIT$GIT_DIRTY"
     printf '  %s%s  %s%-14s%s %s\n' "$INF" "🔧" "$DIM" "Compiler" "$R" "$COMPILER"
     printf '  %s%s  %s%-14s%s %s\n' "$INF" "⏱️"  "$DIM" "Build time" "$R" "$(fmt_duration "$total")"
@@ -1390,7 +1402,7 @@ git_meta
 compiler_meta
 
 section "Build configuration"
-row "Target" "Redmi 10 (selene) · MT6768"
+row "Target" "$DEVICE_NAME (selene) · MT6768"
 row "Source" "$GIT_BRANCH @ $GIT_COMMIT$GIT_DIRTY"
 row "Config" "$DEFCONFIG + $FRAGMENT_REL"
 row "Variant" "$BUILD_VARIANT"

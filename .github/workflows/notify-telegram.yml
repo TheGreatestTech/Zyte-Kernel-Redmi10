@@ -141,7 +141,7 @@ jobs:
               quote_lines.append("• KazeSU + SUSFS v2.4.0 + NoMount")
 
           quote_lines.append(f"• Zyte Kernel v{html.escape(version)}")
-          quote_lines.append("• Redmi 10 (selene) · MT6768")
+          quote_lines.append("• Redmi 10 / 2022 / Prime (selene) · MT6768")
           changelog = "\n".join(quote_lines)[:600]
 
           # Build stats written by the build workflow (duration, units, ccache).
@@ -190,7 +190,7 @@ jobs:
               f"<b>{title}</b>\n"
               f"<i>Version: v{html.escape(version)}</i>\n"
               f"<i>{tag}</i>\n"
-              f"<i>Redmi 10 (selene) · MT6768</i>\n"
+              f"<i>Redmi 10 / 2022 / Prime (selene) · MT6768</i>\n"
               + (f"<i>{build_line}</i>\n" if build_line else "")
               + f"\n<blockquote>{changelog}</blockquote>\n\n"
               f"<b>Downloads:</b>\n"

@@ -374,7 +374,7 @@ jobs:
           set -Eeuo pipefail
           mkdir -p releases
           cat > releases/RELEASE_BODY.md <<'BODY'
-          # 🎯 Zyte Kernel **v${{ env.ZYTE_VERSION }}** for Redmi 10 (selene / MT6768)
+          # 🎯 Zyte Kernel **v${{ env.ZYTE_VERSION }}** for Redmi 10 / 2022 / Prime (selene / MT6768)
 
           Automated kernel build with **BakaSU** + optional **SUSFS v2.4.0** + **NoMount**.
 
@@ -405,7 +405,7 @@ jobs:
           3. Flash via **TWRP** / **OrangeFox** / any custom recovery
           4. Reboot
 
-          > ⚠️ **Note:** This kernel is for **Redmi 10 (selene)** only.
+          > ⚠️ **Note:** This kernel is for **Redmi 10 / 2022 / Prime (selene)** only.
 
           ---
           ### 🔗 Links
