@@ -31,7 +31,7 @@ ARCH="arm64"
 DEFCONFIG="vendor/mt6768_defconfig"
 FRAGMENT_REL="vendor/selene.config"
 FRAGMENT="$SRC/arch/arm64/configs/$FRAGMENT_REL"
-JOBS="$(nproc 2>/dev/null || echo 4)"
+JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 # Load limit for make (prevents overloading the system). 0 = no limit.
 # Can be overridden with MAKE_LOAD_LIMIT env var or --load-limit arg.
 MAKE_LOAD_LIMIT="${MAKE_LOAD_LIMIT:-0}"

@@ -126,7 +126,7 @@ at once), the build still succeeds with a warning.
 
 `workflow_dispatch` inputs: `neutron_tag` (compiler), `kernel_ref` (kernel branch/tag/commit),
 `variant` (`all-in-one` / `root-nomount` / `kazesu` / `base`), `version_bump`
-(`none` / `patch` / `minor` / `major`).
+(`none` / `patch` / `minor` / `major`), `jobs_count` (parallel make jobs, default `5`).
 
 `notify-telegram.yml` posts the banner, build details and the zip to Telegram after every
 successful build.

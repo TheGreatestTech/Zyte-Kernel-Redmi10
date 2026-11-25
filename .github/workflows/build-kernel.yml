@@ -23,6 +23,11 @@ on:
           - root-nomount
           - kazesu
           - base
+      jobs_count:
+        description: 'Parallel build jobs (default 5)'
+        required: false
+        default: '5'
+        type: string
       version_bump:
         description: 'Version bump applied before this build (none = rebuild the current release)'
         required: false
@@ -241,9 +246,13 @@ jobs:
           OUT_DIR: ${{ github.workspace }}/out
           TOOLCHAIN_DIR: ${{ github.workspace }}/toolchains/neutron-clang
           ANYKERNEL_DIR: ${{ github.workspace }}/Zyte-Kernel
-          MAKE_LOAD_LIMIT: "2"
+          # GitHub's free runners are small (2 vCPU on private repos, 4 on
+          # public), so oversubscribe a little instead of starving make.
+          JOBS: ${{ inputs.jobs_count || '5' }}
+          MAKE_LOAD_LIMIT: "0"
         run: |
           set -Eeuo pipefail
+          echo "Runner CPUs: $(nproc) - building with JOBS=$JOBS"
           bash ./build.sh --clean --reconfig --variant "${{ inputs.variant || 'all-in-one' }}"
 
           ZIP="$(find out -maxdepth 1 -type f -name 'Zyte-Kernel-*.zip' -print -quit)"
