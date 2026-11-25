@@ -1,6 +1,6 @@
 # Zyte Kernel - build & integration guide
 
-This repository holds the **build tooling** for the Redmi 10 Prime (selene / MT6768)
+This repository holds the **build tooling** for the Redmi 10 (selene / MT6768)
 kernel. The kernel sources live in a separate repository
 ([`TheGreatestTech/MT6768-Kernel-4.19`](https://github.com/TheGreatestTech/MT6768-Kernel-4.19),
 `lineage-24.0`, Linux 4.19) and are cloned into `source/`:

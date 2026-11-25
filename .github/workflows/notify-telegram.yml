@@ -86,11 +86,9 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           REPO: ${{ github.repository }}
-          REPO_URL: ${{ github.event.repository.html_url }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           VERSION: ${{ steps.artifact.outputs.version }}
           ZIP_PATH: ${{ steps.artifact.outputs.zip_path }}
-          SUMS_PATH: ${{ steps.artifact.outputs.sums_path }}
         run: |
           python3 - << 'EOF'
           import hashlib, html, json, os, urllib.request
@@ -99,10 +97,8 @@ jobs:
           token = os.environ["BOT_TOKEN"]
           chat_id = os.environ["CHANNEL_ID"]
           repo = os.environ["REPO"]
-          repo_url = html.escape(os.environ["REPO_URL"])
           run_url = html.escape(os.environ["RUN_URL"])
           zip_path = os.environ.get("ZIP_PATH") or ""
-          sums_path = os.environ.get("SUMS_PATH") or ""
 
           api_url = f"https://api.github.com/repos/{repo}/releases?per_page=10"
           req = urllib.request.Request(api_url, headers={"Accept": "application/vnd.github+json"})
@@ -145,8 +141,33 @@ jobs:
               quote_lines.append("• KazeSU + SUSFS v2.4.0 + NoMount")
 
           quote_lines.append(f"• Zyte Kernel v{html.escape(version)}")
-          quote_lines.append("• Redmi 10 Prime (selene) · MT6768")
+          quote_lines.append("• Redmi 10 (selene) · MT6768")
           changelog = "\n".join(quote_lines)[:600]
+
+          # Build stats written by the build workflow (duration, units, ccache).
+          stats = {}
+          for root, _dirs, files in os.walk("artifacts"):
+              if "build-stats.json" in files:
+                  try:
+                      with open(os.path.join(root, "build-stats.json")) as fh:
+                          stats = json.load(fh)
+                  except Exception:
+                      stats = {}
+                  break
+
+          stat_parts = []
+          secs = int(stats.get("compile_seconds") or 0)
+          if secs:
+              stat_parts.append(f"⏱ {secs // 60}m{secs % 60:02d}s")
+          units = int(stats.get("units") or 0)
+          if units:
+              stat_parts.append(f"⚙ {units:,} units")
+          rate = stats.get("ccache_hit_rate")
+          if rate not in (None, ""):
+              filled = max(0, min(10, round(float(rate) / 10)))
+              bar = "█" * filled + "░" * (10 - filled)
+              stat_parts.append(f"ccache <code>{bar}</code> {float(rate):.0f}%")
+          build_line = " · ".join(stat_parts)
 
           asset_links = []
           for asset in rel.get("assets", []):
@@ -169,11 +190,11 @@ jobs:
               f"<b>{title}</b>\n"
               f"<i>Version: v{html.escape(version)}</i>\n"
               f"<i>{tag}</i>\n"
-              f"<i>Redmi 10 Prime (selene) · MT6768</i>\n\n"
-              f"<blockquote>{changelog}</blockquote>\n\n"
+              f"<i>Redmi 10 (selene) · MT6768</i>\n"
+              + (f"<i>{build_line}</i>\n" if build_line else "")
+              + f"\n<blockquote>{changelog}</blockquote>\n\n"
               f"<b>Downloads:</b>\n"
-              f"{downloads}\n\n"
-              f'And, sure... <a href="{repo_url}">sources!</a>'
+              f"{downloads}"
           )
           if sha256:
               caption += f"\n\n<code>SHA256\n{sha256}</code>"
@@ -214,16 +235,6 @@ jobs:
                       data={"chat_id": chat_id, "caption": doc_caption, "parse_mode": "HTML"},
                       files={"document": (os.path.basename(zip_path), fh)},
                       timeout=300,
-                  )
-              r.raise_for_status()
-
-          if sums_path and os.path.exists(sums_path):
-              with open(sums_path, "rb") as fh:
-                  r = requests.post(
-                      f"https://api.telegram.org/bot{token}/sendDocument",
-                      data={"chat_id": chat_id, "caption": "SHA256SUMS"},
-                      files={"document": ("SHA256SUMS", fh)},
-                      timeout=60,
                   )
               r.raise_for_status()
           EOF

@@ -320,6 +320,26 @@ jobs:
           echo "KERNEL_RELEASE=$(cat out/include/config/kernel.release)" >> "$GITHUB_ENV"
           echo "Package: $(basename "$ZIP")"
 
+          if [[ -f out/build-stats.json ]]; then
+            cp -f out/build-stats.json releases/
+            python3 -c '
+            import json
+            d = json.load(open("out/build-stats.json"))
+            secs = int(d.get("compile_seconds") or 0)
+            units = int(d.get("units") or 0)
+            rate = d.get("ccache_hit_rate")
+            parts = []
+            if secs:
+                parts.append("%dm%02ds" % (secs // 60, secs % 60))
+            if units:
+                parts.append("{:,} units".format(units))
+            if rate not in (None, ""):
+                parts.append("ccache %s%%" % rate)
+            print("BUILD_STATS=" + " · ".join(parts))
+            ' >> "$GITHUB_ENV"
+            echo "Build stats: $BUILD_STATS"
+          fi
+
       - name: Build summary
         run: |
           set -Eeuo pipefail
@@ -333,6 +353,7 @@ jobs:
             echo "| Clang | \`${{ steps.neutron.outputs.tag }}\` |"
             echo "| Variant | \`${{ inputs.variant || 'all-in-one' }}\` |"
             echo "| Jobs | \`${{ inputs.jobs_count || '5' }}\` on $(nproc) CPUs |"
+            [[ -n "${BUILD_STATS:-}" ]] && echo "| Build | $BUILD_STATS |"
             echo "| Release token | $RELEASE_TOKEN_SOURCE |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -353,7 +374,7 @@ jobs:
           set -Eeuo pipefail
           mkdir -p releases
           cat > releases/RELEASE_BODY.md <<'BODY'
-          # 🎯 Zyte Kernel **v${{ env.ZYTE_VERSION }}** for Redmi 10 Prime (selene / MT6768)
+          # 🎯 Zyte Kernel **v${{ env.ZYTE_VERSION }}** for Redmi 10 (selene / MT6768)
 
           Automated kernel build with **BakaSU** + optional **SUSFS v2.4.0** + **NoMount**.
 
@@ -368,6 +389,7 @@ jobs:
           | **AnyKernel3** | `${{ env.ANYKERNEL_COMMIT }}` |
           | **Root** | `${{ env.KAZESU_COMMIT }}` (BakaSU) |
           | **NoMount** | `${{ env.NOMOUNT_COMMIT }}` |
+          | **Build** | ${{ env.BUILD_STATS }} |
 
           ---
           ### 🏗️ Build Configuration
@@ -383,7 +405,7 @@ jobs:
           3. Flash via **TWRP** / **OrangeFox** / any custom recovery
           4. Reboot
 
-          > ⚠️ **Note:** This kernel is for **Redmi 10 Prime (selene)** only.
+          > ⚠️ **Note:** This kernel is for **Redmi 10 (selene)** only.
 
           ---
           ### 🔗 Links
@@ -403,6 +425,7 @@ jobs:
           path: |
             releases/*.zip
             releases/SHA256SUMS
+            releases/build-stats.json
             releases/logs/*.log
           if-no-files-found: error
           retention-days: 30

@@ -1,6 +1,6 @@
 # Zyte Kernel Build
 
-Automated build repository for the **Redmi 10 Prime (selene / MT6768)** kernel.
+Automated build repository for the **Redmi 10 (selene / MT6768)** kernel.
 
 **Current release: `v1.0`** — see the [`VERSION`](VERSION) file (bump it there).
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  Zyte Kernel build script
-#  Device : Redmi 10 Prime (selene) - MediaTek MT6768
+#  Device : Redmi 10 (selene) - MediaTek MT6768
 #  Kernel : 4.19 (LineageOS 24.0 tree)
 # =============================================================================
 set -Eeuo pipefail
@@ -125,7 +125,7 @@ banner() {
         gradient "  $line" "$CYN" "$BLU" "$MAUV"
         printf '\n'
     done
-    gradient "  Zyte Kernel  ·  Redmi 10 Prime (selene)  ·  MediaTek MT6768  ·  Linux 4.19" "$GRY" "$SUB1" "$DIM"
+    gradient "  Zyte Kernel  ·  Redmi 10 (selene)  ·  MediaTek MT6768  ·  Linux 4.19" "$GRY" "$SUB1" "$DIM"
     printf '\n'
     printf '  %s%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n' "$DIM" "$R"
 }
@@ -224,7 +224,7 @@ artifact() {
 usage() {
     cat <<EOF
 
-  Zyte Kernel build script - Redmi 10 Prime (selene)
+  Zyte Kernel build script - Redmi 10 (selene)
 
   Usage: ./build.sh [options]
 
@@ -1154,10 +1154,23 @@ compile_kernel() {
     ok "Kernel compiled in $(fmt_duration "$COMPILE_SECONDS")"
 
     # Show ccache statistics if available
+    local ccache_rate=""
     if command -v ccache >/dev/null 2>&1 && [[ -n "${CCACHE_DIR:-}" ]]; then
         subsection "ccache statistics"
         ccache -s 2>/dev/null | sed 's/^/  /' || true
+        ccache_rate="$(ccache -s 2>/dev/null \
+            | sed -n 's/^ *Hits:.*(\([0-9.]*\)%).*/\1/p' | head -n1 || true)"
     fi
+
+    # Machine-readable stats for the release body and the Telegram post.
+    {
+        printf '{"variant":"%s","jobs":%s,"compile_seconds":%s,"units":%s' \
+            "$BUILD_VARIANT" "$JOBS" "$COMPILE_SECONDS" "$units_seen"
+        if [[ -n "$ccache_rate" ]]; then
+            printf ',"ccache_hit_rate":%s' "$ccache_rate"
+        fi
+        printf '}\n'
+    } > "$OUT/build-stats.json"
 }
 
 # -----------------------------------------------------------------------------
@@ -1325,7 +1338,7 @@ success_screen() {
     printf '\n'
 
     # Info rows with icons
-    printf '  %s%s  %s%-14s%s %s\n' "$INF" "📱" "$DIM" "Device" "$R" "Redmi 10 Prime (selene) · MT6768"
+    printf '  %s%s  %s%-14s%s %s\n' "$INF" "📱" "$DIM" "Device" "$R" "Redmi 10 (selene) · MT6768"
     printf '  %s%s  %s%-14s%s %s\n' "$INF" "🌿" "$DIM" "Source" "$R" "$GIT_BRANCH @ $GIT_COMMIT$GIT_DIRTY"
     printf '  %s%s  %s%-14s%s %s\n' "$INF" "🔧" "$DIM" "Compiler" "$R" "$COMPILER"
     printf '  %s%s  %s%-14s%s %s\n' "$INF" "⏱️"  "$DIM" "Build time" "$R" "$(fmt_duration "$total")"
@@ -1377,7 +1390,7 @@ git_meta
 compiler_meta
 
 section "Build configuration"
-row "Target" "Redmi 10 Prime (selene) · MT6768"
+row "Target" "Redmi 10 (selene) · MT6768"
 row "Source" "$GIT_BRANCH @ $GIT_COMMIT$GIT_DIRTY"
 row "Config" "$DEFCONFIG + $FRAGMENT_REL"
 row "Variant" "$BUILD_VARIANT"
