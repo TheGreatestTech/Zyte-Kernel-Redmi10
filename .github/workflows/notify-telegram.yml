@@ -64,7 +64,6 @@ jobs:
 
           gh run download "$RUN_ID" --name "$ARTIFACT" --dir artifacts
           ZIP="$(find artifacts -type f -name '*.zip' -print -quit)"
-          SUMS="$(find artifacts -type f -name 'SHA256SUMS' -print -quit)"
 
           # The zip name carries the release version (…-v1.0.1-<stamp>.zip).
           # Prefer it over the VERSION file: the build run bumped the version
@@ -77,7 +76,6 @@ jobs:
 
           echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "zip_path=${ZIP:-}" >> "$GITHUB_OUTPUT"
-          echo "sums_path=${SUMS:-}" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Downloaded $ARTIFACT (version v$VERSION)"
 
@@ -172,6 +170,9 @@ jobs:
           asset_links = []
           for asset in rel.get("assets", []):
               aname = html.escape(asset["name"])
+              if aname == "SHA256SUMS":
+                  # The hash is already in the caption - no need for the file here.
+                  continue
               aurl = html.escape(asset["browser_download_url"])
               asset_links.append(f'<a href="{aurl}">{aname}</a>')
 
