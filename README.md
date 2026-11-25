@@ -82,6 +82,38 @@ alone.
 `redmi_10_prime_los24_a17/susfs_fixed.patch` from
 [`TheGreatestTech/NonGKI_Kernel_Patches`](https://github.com/TheGreatestTech/NonGKI_Kernel_Patches).
 
+## Versioning
+
+The version lives in one file, [`VERSION`](VERSION):
+
+```bash
+echo "1.1" > VERSION     # v1.0 -> v1.1
+```
+
+It is used everywhere: `uname -r` (`...-ZyteKernel-v1.1`), the zip name, the GitHub
+release tag/title and the Telegram post.
+
+### Policy: bumps are opt-in
+
+A weekly rebuild is the **same release** built against newer upstream BakaSU/NoMount
+commits - not a new version. The build date in the tag plus the dependency commit SHAs
+in the release body already identify each build exactly.
+
+| `version_bump` input | Effect |
+|---|---|
+| `none` *(default, and always for scheduled runs)* | keep the current version |
+| `patch` | `1.0` → `1.0.1` |
+| `minor` | `1.0` → `1.1.0` |
+| `major` | `1.0` → `2.0.0` |
+
+* **Weekly rebuild** → `zyte-kernel-v1.0-<date>` (same version, new date)
+* **A real change** → dispatch with `patch`/`minor`/`major` → the version moves and is
+  committed back to the branch
+
+[`scripts/bump-version.sh`](scripts/bump-version.sh) does the bump and exports the new
+version to `$GITHUB_ENV` for the release tag and Telegram. If the push fails (two runs
+at once), the build still succeeds with a warning.
+
 ## CI
 
 `.github/workflows/build-kernel.yml` runs on schedule and on manual dispatch:
