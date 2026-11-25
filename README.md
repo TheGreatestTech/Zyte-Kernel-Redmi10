@@ -128,6 +128,20 @@ at once), the build still succeeds with a warning.
 `variant` (`all-in-one` / `root-nomount` / `kazesu` / `base`), `version_bump`
 (`none` / `patch` / `minor` / `major`), `jobs_count` (parallel make jobs, default `5`).
 
+### Publishing releases
+
+Releases are created by [`scripts/publish-release.sh`](scripts/publish-release.sh), not by
+an action, because the 403s were opaque. It prints the token identity and the exact HTTP
+response for every attempt, creates the tag through the Git Data API first, and falls back
+to the second token if the first one cannot publish.
+
+> **Gotcha:** `POST /releases` refuses with `403 Resource not accessible by integration`
+> when the target commit touches `.github/workflows/` and the token has no *workflow*
+> permission - and the built-in `GITHUB_TOKEN` **can never** be authorised for that.
+> A classic PAT needs the `workflow` scope; a fine-grained PAT needs
+> *Workflows: Read and write*. A tag-only probe does **not** catch this, which is why the
+> preflight now creates a draft release too.
+
 ### CI performance
 
 * **ccache is real now** - `ccache-action` saves under `<key>-<timestamp>`, so the exact

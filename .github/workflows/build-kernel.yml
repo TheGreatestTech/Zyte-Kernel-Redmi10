@@ -77,55 +77,16 @@ jobs:
           fetch-depth: 1
 
       - name: Verify release permissions
-        id: reltoken
         env:
-          # The built-in token is capped by the repository's workflow-permission
-          # setting; a PAT bypasses it. Probe both and use whichever can really
-          # create a tag, so a stale/expired PAT cannot silently break releases.
-          TOKEN_ACTIONS: ${{ github.token }}
-          TOKEN_PAT: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          set -Eeuo pipefail
-          REPO="${{ github.repository }}"
-          SHA="${{ github.sha }}"
-
-          # Creates a throwaway tag: the cheapest honest test of "contents: write".
-          probe() {
-            local name="$1" token="$2" ref code
-            if [[ -z "$token" ]]; then
-              echo "  $name: not set"
-              return 1
-            fi
-            ref="refs/tags/zyte-perm-probe-${{ github.run_id }}-$RANDOM"
-            code="$(curl -sS -o /tmp/probe.json -w '%{http_code}' \
-              -X POST -H "Authorization: Bearer $token" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPO/git/refs" \
-              -d "{\"ref\":\"$ref\",\"sha\":\"$SHA\"}")"
-            if [[ "$code" == "201" ]]; then
-              curl -sS -o /dev/null -X DELETE -H "Authorization: Bearer $token" \
-                "https://api.github.com/repos/$REPO/git/$ref" || true
-              echo "  $name: CAN write (tag probe created and deleted)"
-              return 0
-            fi
-            echo "  $name: CANNOT write -> HTTP $code $(head -c 300 /tmp/probe.json | tr -d '\n')"
-            return 1
-          }
-
-          echo "Release token probe for $REPO @ ${SHA:0:8}:"
-          if probe "RELEASE_TOKEN (PAT)" "$TOKEN_PAT"; then
-            CHOSEN="$TOKEN_PAT"; WHICH="RELEASE_TOKEN secret"
-          elif probe "GITHUB_TOKEN" "$TOKEN_ACTIONS"; then
-            CHOSEN="$TOKEN_ACTIONS"; WHICH="built-in GITHUB_TOKEN"
-          else
-            echo "::error::No token can create a release. Set Settings -> Actions -> General -> Workflow permissions = 'Read and write permissions', or add a PAT with 'Contents: write' as the RELEASE_TOKEN secret."
-            exit 1
-          fi
-          echo "Release will use: $WHICH"
-          {
-            echo "RELEASE_TOKEN_CHOSEN=$CHOSEN"
-            echo "RELEASE_TOKEN_SOURCE=$WHICH"
-          } >> "$GITHUB_ENV"
+          # Probe the real sequence (tag + release) with each token, then delete
+          # the probe. Fails in seconds instead of after a 20 minute build.
+          REPO: ${{ github.repository }}
+          TAG: zyte-perm-probe-${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          NAME: permission probe
+          TOKENS: ${{ secrets.RELEASE_TOKEN }} ${{ github.token }}
+          PROBE: '1'
+        run: bash scripts/publish-release.sh
 
       - name: Set build date
         run: |
@@ -387,6 +348,54 @@ jobs:
           (cd releases && sha256sum ./*.zip > SHA256SUMS)
           cat releases/SHA256SUMS
 
+      - name: Prepare release body
+        run: |
+          set -Eeuo pipefail
+          mkdir -p releases
+          cat > releases/RELEASE_BODY.md <<'BODY'
+          # 🎯 Zyte Kernel **v${{ env.ZYTE_VERSION }}** for Redmi 10 Prime (selene / MT6768)
+
+          Automated kernel build with **BakaSU** + optional **SUSFS v2.4.0** + **NoMount**.
+
+          ---
+          ### 📦 Source & Toolchain
+          | Component | Version |
+          |-----------|---------|
+          | **Version** | `v${{ env.ZYTE_VERSION }}` |
+          | **Kernel** | `${{ env.KERNEL_COMMIT }}` (LineageOS 24.0, 4.19.325) |
+          | **Release** | `${{ env.KERNEL_RELEASE }}` |
+          | **Clang** | `${{ steps.neutron.outputs.tag }}` (Neutron Toolchains) |
+          | **AnyKernel3** | `${{ env.ANYKERNEL_COMMIT }}` |
+          | **Root** | `${{ env.KAZESU_COMMIT }}` (BakaSU) |
+          | **NoMount** | `${{ env.NOMOUNT_COMMIT }}` |
+
+          ---
+          ### 🏗️ Build Configuration
+          - **Variant:** `${{ inputs.variant || 'all-in-one' }}`
+          - **Root:** BakaSU (`CONFIG_KSU=y`, manual hook mode)
+          - **SUSFS:** v2.4.0 (all-in-one only)
+          - **Logging:** Disabled (`CONFIG_KSU_SUSFS_ENABLE_LOG` not set)
+
+          ---
+          ### 📥 Installation
+          1. Download the `Zyte-Kernel-*.zip` from this release
+          2. Verify SHA-256 checksum (see `SHA256SUMS`)
+          3. Flash via **TWRP** / **OrangeFox** / any custom recovery
+          4. Reboot
+
+          > ⚠️ **Note:** This kernel is for **Redmi 10 Prime (selene)** only.
+
+          ---
+          ### 🔗 Links
+          - [Kernel source](https://github.com/TheGreatestTech/MT6768-Kernel-4.19)
+          - [AnyKernel3 Template](https://github.com/TheGreatestTech/AnyKernel3-selene)
+          - [BakaSU](https://github.com/Baka-SU/BakaSU)
+          - [SUSFS](https://gitlab.com/simonpunk/susfs4ksu)
+          - [NoMount](https://github.com/maxsteeel/nomount)
+
+          Built with ❤️ using GitHub Actions
+          BODY
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -399,59 +408,16 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          # The exact token that passed the probe above (PAT if valid,
-          # otherwise the built-in GITHUB_TOKEN).
-          token: ${{ env.RELEASE_TOKEN_CHOSEN }}
-          tag_name: zyte-kernel-v${{ env.ZYTE_VERSION }}-${{ env.BUILD_DATE }}
-          name: Zyte Kernel v${{ env.ZYTE_VERSION }} - ${{ env.BUILD_DATE }}
-          target_commitish: ${{ github.sha }}
-          body: |
-            # 🎯 Zyte Kernel **v${{ env.ZYTE_VERSION }}** for Redmi 10 Prime (selene / MT6768)
-
-            Automated kernel build with **BakaSU** + optional **SUSFS v2.4.0** + **NoMount**.
-
-            ---
-            ### 📦 Source & Toolchain
-            | Component | Version |
-            |-----------|---------|
-            | **Version** | `v${{ env.ZYTE_VERSION }}` |
-            | **Kernel** | `${{ env.KERNEL_COMMIT }}` (LineageOS 24.0, 4.19.325) |
-            | **Release** | `${{ env.KERNEL_RELEASE }}` |
-            | **Clang** | `${{ steps.neutron.outputs.tag }}` (Neutron Toolchains) |
-            | **AnyKernel3** | `${{ env.ANYKERNEL_COMMIT }}` |
-            | **Root** | `${{ env.KAZESU_COMMIT }}` (BakaSU) |
-            | **NoMount** | `${{ env.NOMOUNT_COMMIT }}` |
-
-            ---
-            ### 🏗️ Build Configuration
-            - **Variant:** `${{ inputs.variant || 'all-in-one' }}`
-            - **Root:** BakaSU (`CONFIG_KSU=y`, manual hook mode)
-            - **SUSFS:** v2.4.0 (all-in-one only)
-            - **Logging:** Disabled (`CONFIG_KSU_SUSFS_ENABLE_LOG` not set)
-
-            ---
-            ### 📥 Installation
-            1. Download the `Zyte-Kernel-*.zip` from this release
-            2. Verify SHA-256 checksum (see `SHA256SUMS`)
-            3. Flash via **TWRP** / **OrangeFox** / any custom recovery
-            4. Reboot
-
-            > ⚠️ **Note:** This kernel is for **Redmi 10 Prime (selene)** only.
-
-            ---
-            ### 🔗 Links
-            - [Kernel source](https://github.com/TheGreatestTech/MT6768-Kernel-4.19)
-            - [AnyKernel3 Template](https://github.com/TheGreatestTech/AnyKernel3-selene)
-            - [BakaSU](https://github.com/Baka-SU/BakaSU)
-            - [SUSFS](https://gitlab.com/simonpunk/susfs4ksu)
-            - [NoMount](https://github.com/maxsteeel/nomount)
-
-            Built with ❤️ using GitHub Actions
-          files: |
-            releases/*.zip
-            releases/SHA256SUMS
-          fail_on_unmatched_files: true
-          draft: false
-          prerelease: false
+        env:
+          REPO: ${{ github.repository }}
+          TAG: zyte-kernel-v${{ env.ZYTE_VERSION }}-${{ env.BUILD_DATE }}
+          SHA: ${{ github.sha }}
+          NAME: Zyte Kernel v${{ env.ZYTE_VERSION }} - ${{ env.BUILD_DATE }}
+          BODY_FILE: releases/RELEASE_BODY.md
+          TOKENS: ${{ env.RELEASE_TOKEN_CHOSEN }} ${{ env.RELEASE_TOKEN_OTHERS }}
+        run: |
+          set -Eeuo pipefail
+          # shellcheck disable=SC2125
+          ASSETS="$(ls releases/*.zip releases/SHA256SUMS | tr '\n' ' ')"
+          export ASSETS
+          bash scripts/publish-release.sh
