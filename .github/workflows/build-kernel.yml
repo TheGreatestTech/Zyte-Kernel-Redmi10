@@ -57,6 +57,11 @@ env:
   KERNEL_REPO: 'https://github.com/TheGreatestTech/MT6768-Kernel-4.19.git'
   KERNEL_BRANCH: 'lineage-24.0'
   KERNEL_PIN: '1fbd52855444'
+  # ccache object cache cap (on-disk, compressed). One full selene build is
+  # roughly 0.8-1.5 GB compressed, so 3 GB holds a couple of variants plus
+  # headroom. Raising it only makes every run upload more: actions/cache keys
+  # are immutable, so each run saves a fresh full snapshot of this directory.
+  CCACHE_MAXSIZE: '3G'
 
 jobs:
   build:
@@ -302,7 +307,7 @@ jobs:
           key: zyte-selene-${{ runner.os }}-${{ steps.neutron.outputs.tag }}
           restore-keys: |
             zyte-selene-${{ runner.os }}-
-          max-size: 3G
+          max-size: ${{ env.CCACHE_MAXSIZE }}
           variant: ccache
           job-summary: ccache
 
@@ -338,8 +343,6 @@ jobs:
           # public), so oversubscribe a little instead of starving make.
           JOBS: ${{ inputs.jobs_count || '5' }}
           MAKE_LOAD_LIMIT: "0"
-          # Must match the ccache-action max-size, or the saved cache is truncated.
-          CCACHE_MAXSIZE: 3G
         run: |
           set -Eeuo pipefail
           echo "Runner CPUs: $(nproc) - building with JOBS=$JOBS"
