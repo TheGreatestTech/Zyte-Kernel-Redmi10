@@ -167,16 +167,12 @@ jobs:
               stat_parts.append(f"ccache <code>{bar}</code> {float(rate):.0f}%")
           build_line = " · ".join(stat_parts)
 
-          asset_links = []
-          for asset in rel.get("assets", []):
-              aname = html.escape(asset["name"])
-              if aname == "SHA256SUMS":
-                  # The hash is already in the caption - no need for the file here.
-                  continue
-              aurl = html.escape(asset["browser_download_url"])
-              asset_links.append(f'<a href="{aurl}">{aname}</a>')
-
-          downloads = "\n".join(asset_links) if asset_links else f'<a href="{run_url}">Workflow Run</a>'
+          # The flashable zip is uploaded to the channel directly, so the post
+          # does not link the GitHub release assets - the package is the post.
+          if zip_path and os.path.exists(zip_path):
+              package = f"\U0001F4E6 {html.escape(os.path.basename(zip_path))} (attached below)"
+          else:
+              package = f'<a href="{run_url}">Workflow Run</a>'
 
           # SHA-256 of the package we are about to upload.
           sha256 = ""
@@ -194,8 +190,8 @@ jobs:
               f"<i>Redmi 10 / 2022 / Prime (selene) · MT6768</i>\n"
               + (f"<i>{build_line}</i>\n" if build_line else "")
               + f"\n<blockquote>{changelog}</blockquote>\n\n"
-              f"<b>Downloads:</b>\n"
-              f"{downloads}"
+              f"<b>Package:</b>\n"
+              f"{package}"
           )
           if sha256:
               caption += f"\n\n<code>SHA256\n{sha256}</code>"
