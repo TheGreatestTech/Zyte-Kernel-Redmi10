@@ -322,7 +322,7 @@ jobs:
 
           if [[ -f out/build-stats.json ]]; then
             cp -f out/build-stats.json releases/
-            python3 -c '
+            BUILD_STATS="$(python3 -c '
             import json
             d = json.load(open("out/build-stats.json"))
             secs = int(d.get("compile_seconds") or 0)
@@ -335,26 +335,32 @@ jobs:
                 parts.append("{:,} units".format(units))
             if rate not in (None, ""):
                 parts.append("ccache %s%%" % rate)
-            print("BUILD_STATS=" + " · ".join(parts))
-            ' >> "$GITHUB_ENV"
+            print(" · ".join(parts))
+            ')"
+            # Keep it in this step *and* in the environment of the later steps.
+            echo "BUILD_STATS=$BUILD_STATS" >> "$GITHUB_ENV"
             echo "Build stats: $BUILD_STATS"
           fi
 
       - name: Build summary
         run: |
           set -Eeuo pipefail
+          # Every value gets a default: this step runs *after* a 17 minute
+          # build, so an unset variable must never abort the job.
           {
-            echo "### 🎯 Zyte Kernel v$ZYTE_VERSION"
+            echo "### 🎯 Zyte Kernel v${ZYTE_VERSION:-unknown}"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| Kernel | \`$KERNEL_COMMIT\` |"
-            echo "| Release | \`$KERNEL_RELEASE\` |"
-            echo "| Clang | \`${{ steps.neutron.outputs.tag }}\` |"
+            echo "| Kernel | \`${KERNEL_COMMIT:-unknown}\` |"
+            echo "| Release | \`${KERNEL_RELEASE:-unknown}\` |"
+            echo "| Clang | \`${{ steps.neutron.outputs.tag || 'unknown' }}\` |"
             echo "| Variant | \`${{ inputs.variant || 'all-in-one' }}\` |"
             echo "| Jobs | \`${{ inputs.jobs_count || '5' }}\` on $(nproc) CPUs |"
-            [[ -n "${BUILD_STATS:-}" ]] && echo "| Build | $BUILD_STATS |"
-            echo "| Release token | $RELEASE_TOKEN_SOURCE |"
+            if [[ -n "${BUILD_STATS:-}" ]]; then
+              echo "| Build | $BUILD_STATS |"
+            fi
+            echo "| Release token | ${RELEASE_TOKEN_SOURCE:-unknown} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify release files and generate checksums
@@ -440,7 +446,14 @@ jobs:
           TOKENS: ${{ env.RELEASE_TOKEN_CHOSEN }} ${{ env.RELEASE_TOKEN_OTHERS }}
         run: |
           set -Eeuo pipefail
-          # shellcheck disable=SC2125
-          ASSETS="$(ls releases/*.zip releases/SHA256SUMS | tr '\n' ' ')"
-          export ASSETS
+          # Collect the assets without `ls` parsing, and fail loudly if the
+          # package is missing instead of publishing an empty release.
+          mapfile -t ASSET_FILES < <(find releases -maxdepth 1 -type f \
+            \( -name '*.zip' -o -name 'SHA256SUMS' \) | sort)
+          [[ "${#ASSET_FILES[@]}" -ge 1 ]] || {
+            echo '::error::No release assets found in releases/'
+            exit 1
+          }
+          export ASSETS="${ASSET_FILES[*]}"
+          echo "Assets: $ASSETS"
           bash scripts/publish-release.sh
