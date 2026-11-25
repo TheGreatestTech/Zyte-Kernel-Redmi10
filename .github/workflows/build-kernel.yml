@@ -45,7 +45,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: zyte-kernel-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -62,7 +62,8 @@ jobs:
   build:
     name: Build ${{ inputs.variant || 'all-in-one' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    # A clean build takes ~20-30 min; anything past 2h is a hang, not a build.
+    timeout-minutes: 120
 
     steps:
       - name: Checkout build repository
@@ -176,8 +177,9 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
+          export DEBIAN_FRONTEND=noninteractive
+          sudo -E apt-get update -qq -o Acquire::Retries=3
+          sudo -E apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
             bc bison build-essential ccache cpio curl device-tree-compiler \
             flex git libelf-dev libncurses-dev libssl-dev lz4 make patch \
             perl pkg-config python3 python3-requests rsync unzip zip zstd wget
@@ -191,18 +193,28 @@ jobs:
           git -C source init -q
           git -C source remote add origin "$KERNEL_REPO"
 
-          # GitHub refuses "git fetch <sha>" unless the server allows it, so a
-          # pinned commit is resolved from the branch history instead.
-          git -C source fetch --depth 200 origin "$KERNEL_BRANCH"
-          if git -C source rev-parse --verify --quiet "$REF^{commit}" >/dev/null; then
-            git -C source checkout -q --detach "$REF"
-            echo "Kernel: pinned to $REF"
-          elif git -C source rev-parse --verify --quiet FETCH_HEAD >/dev/null; then
-            git -C source checkout -q --detach FETCH_HEAD
-            echo "::warning::'$REF' is not in '$KERNEL_BRANCH' - building the branch tip instead"
-          else
-            echo "::error::Could not resolve '$REF' from '$KERNEL_BRANCH'"
-            exit 1
+          # GitHub refuses "git fetch <sha>" unless the server allows it, so the
+          # pin is resolved from the branch history. Fetch the least history that
+          # can contain it: depth 1 is enough while the pin is the branch tip,
+          # and deeper fetches are incremental only when actually needed.
+          resolved=0
+          for depth in 1 50 200; do
+            git -C source fetch -q --depth "$depth" origin "$KERNEL_BRANCH"
+            if git -C source rev-parse --verify --quiet "$REF^{commit}" >/dev/null; then
+              git -C source checkout -q --detach "$REF"
+              echo "Kernel: pinned to $REF (history depth $depth)"
+              resolved=1
+              break
+            fi
+          done
+          if [[ "$resolved" -ne 1 ]]; then
+            if git -C source rev-parse --verify --quiet FETCH_HEAD >/dev/null; then
+              git -C source checkout -q --detach FETCH_HEAD
+              echo "::warning::'$REF' is not in '$KERNEL_BRANCH' - building the branch tip instead"
+            else
+              echo "::error::Could not resolve '$REF' from '$KERNEL_BRANCH'"
+              exit 1
+            fi
           fi
           test -f source/Makefile
           echo "KERNEL_COMMIT=$(git -C source rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
@@ -265,9 +277,15 @@ jobs:
         # A broken/missing cache must never fail the build - it only costs time.
         continue-on-error: true
         with:
-          key: zyte-selene-${{ runner.os }}-${{ steps.neutron.outputs.tag }}-${{ env.KERNEL_COMMIT }}
-          max-size: 5G
+          # ccache-action saves under "<key>-<timestamp>", so the exact key never
+          # matches; restore-keys is what actually restores. Without it the cache
+          # was uploaded every run and never read back.
+          key: zyte-selene-${{ runner.os }}-${{ steps.neutron.outputs.tag }}
+          restore-keys: |
+            zyte-selene-${{ runner.os }}-
+          max-size: 3G
           variant: ccache
+          job-summary: ccache
 
       - name: Checkout selene AnyKernel3 template
         uses: actions/checkout@v4
@@ -301,6 +319,8 @@ jobs:
           # public), so oversubscribe a little instead of starving make.
           JOBS: ${{ inputs.jobs_count || '5' }}
           MAKE_LOAD_LIMIT: "0"
+          # Must match the ccache-action max-size, or the saved cache is truncated.
+          CCACHE_MAXSIZE: 3G
         run: |
           set -Eeuo pipefail
           echo "Runner CPUs: $(nproc) - building with JOBS=$JOBS"
@@ -316,6 +336,22 @@ jobs:
           cp -f out/build.log releases/logs/build.log
           echo "KERNEL_RELEASE=$(cat out/include/config/kernel.release)" >> "$GITHUB_ENV"
           echo "Package: $(basename "$ZIP")"
+
+      - name: Build summary
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "### 🎯 Zyte Kernel v$ZYTE_VERSION"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Kernel | \`$KERNEL_COMMIT\` |"
+            echo "| Release | \`$KERNEL_RELEASE\` |"
+            echo "| Clang | \`${{ steps.neutron.outputs.tag }}\` |"
+            echo "| Variant | \`${{ inputs.variant || 'all-in-one' }}\` |"
+            echo "| Jobs | \`${{ inputs.jobs_count || '5' }}\` on $(nproc) CPUs |"
+            echo "| Release token | $RELEASE_TOKEN_SOURCE |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify release files and generate checksums
         run: |

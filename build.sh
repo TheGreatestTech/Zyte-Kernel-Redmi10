@@ -459,7 +459,7 @@ preflight() {
         export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-5G}"
         export CCACHE_COMPRESS=1
         export CCACHE_COMPRESSLEVEL=6
-        export CCACHE_SLOPPINESS="time_macros,include_file_mtime,file_macro"
+        export CCACHE_SLOPPINESS="time_macros,include_file_ctime,include_file_mtime,file_macro,file_stat_matches"
         ccache --max-size="$CCACHE_MAXSIZE" >/dev/null 2>&1 || true
         ccache -z >/dev/null 2>&1 || true  # zero stats for this build
         export CC="ccache clang"

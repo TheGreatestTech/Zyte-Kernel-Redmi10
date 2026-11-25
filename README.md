@@ -128,6 +128,18 @@ at once), the build still succeeds with a warning.
 `variant` (`all-in-one` / `root-nomount` / `kazesu` / `base`), `version_bump`
 (`none` / `patch` / `minor` / `major`), `jobs_count` (parallel make jobs, default `5`).
 
+### CI performance
+
+* **ccache is real now** - `ccache-action` saves under `<key>-<timestamp>`, so the exact
+  key never matches; `restore-keys` is what restores. It was missing, so every run
+  recompiled everything. Keys are also variant/commit-agnostic so all builds share objects.
+* **Concurrency** cancels superseded runs (`cancel-in-progress`), and the job is capped at
+  **120 min** instead of the 6 h default.
+* **Shallow, adaptive kernel fetch** - depth 1 (the pin is the branch tip), deepening to
+  50/200 only if the pin needs it.
+* **5 make jobs on 4 vCPU** (`jobs_count`) - oversubscribed because kernel builds block on I/O.
+* Artifacts are kept **30 days**; a build summary is written to the run page.
+
 `notify-telegram.yml` posts the banner, build details and the zip to Telegram after every
 successful build.
 
