@@ -24,15 +24,15 @@ on:
           - kazesu
           - base
       version_bump:
-        description: 'Version bump applied before this build'
+        description: 'Version bump applied before this build (none = rebuild the current release)'
         required: false
-        default: 'patch'
+        default: 'none'
         type: choice
         options:
+          - none
           - patch
           - minor
           - major
-          - none
   schedule:
     - cron: '0 0 * * 0'
 
@@ -72,7 +72,9 @@ jobs:
 
       - name: Bump version
         env:
-          BUMP_TYPE: ${{ inputs.version_bump || 'patch' }}
+          # A scheduled run has no inputs -> no bump. Only a manual dispatch
+          # can move the version, and only when the user asks for it.
+          BUMP_TYPE: ${{ inputs.version_bump || 'none' }}
         run: |
           set -Eeuo pipefail
           OLD_VERSION="$(tr -d '[:space:]' < VERSION)"
