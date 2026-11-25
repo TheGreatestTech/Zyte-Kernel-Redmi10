@@ -393,15 +393,17 @@ jobs:
           | **Release** | `${{ env.KERNEL_RELEASE }}` |
           | **Clang** | `${{ steps.neutron.outputs.tag }}` (Neutron Toolchains) |
           | **AnyKernel3** | `${{ env.ANYKERNEL_COMMIT }}` |
-          | **Root** | `${{ env.KAZESU_COMMIT }}` (BakaSU) |
-          | **NoMount** | `${{ env.NOMOUNT_COMMIT }}` |
+          | **Root** | `${{ env.KAZESU_VERSION || 'unknown' }}` (BakaSU @ `${{ env.KAZESU_COMMIT }}`) |
+          | **SUSFS** | `${{ env.SUSFS_VERSION || 'n/a' }}` |
+          | **NoMount** | `${{ env.NOMOUNT_VERSION || 'n/a' }}` (`${{ env.NOMOUNT_COMMIT }}`) |
           | **Build** | ${{ env.BUILD_STATS }} |
 
           ---
           ### 🏗️ Build Configuration
           - **Variant:** `${{ inputs.variant || 'all-in-one' }}`
-          - **Root:** BakaSU (`CONFIG_KSU=y`, manual hook mode)
-          - **SUSFS:** v2.4.0 (all-in-one only)
+          - **Root:** BakaSU `${{ env.KAZESU_VERSION || 'unknown' }}` (`CONFIG_KSU=y`, manual hook mode)
+          - **SUSFS:** `${{ env.SUSFS_VERSION || 'v2.4.0' }}` (all-in-one only)
+          - **NoMount:** `${{ env.NOMOUNT_VERSION || 'n/a' }}`
           - **Logging:** Disabled (`CONFIG_KSU_SUSFS_ENABLE_LOG` not set)
 
           ---

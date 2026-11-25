@@ -124,24 +124,6 @@ jobs:
           tag = html.escape(rel.get("tag_name") or "")
           body = rel.get("body") or ""
 
-          # Pull the key rows out of the release body table.
-          keep_prefixes = (
-              "| **Kernel**", "| **Release**", "| **Clang**",
-              "| **KazeSU**", "| **NoMount**",
-          )
-          quote_lines = []
-          for raw in body.splitlines():
-              line = raw.strip().replace("**", "")
-              if raw.strip().startswith(keep_prefixes):
-                  quote_lines.append(f"• {html.escape(line)}")
-
-          if not quote_lines:
-              quote_lines.append("• KazeSU + SUSFS v2.4.0 + NoMount")
-
-          quote_lines.append(f"• Zyte Kernel v{html.escape(version)}")
-          quote_lines.append("• Redmi 10 / 2022 / Prime (selene) · MT6768")
-          changelog = "\n".join(quote_lines)[:600]
-
           # Build stats written by the build workflow (duration, units, ccache).
           stats = {}
           for root, _dirs, files in os.walk("artifacts"):
@@ -152,6 +134,49 @@ jobs:
                   except Exception:
                       stats = {}
                   break
+
+          # Component versions: prefer the resolved tags from build-stats.json
+          # ("BakaSU v4.2.0-rc3"), fall back to the release body rows.
+          components = stats.get("components") or {}
+          comp_lines = []
+          root_name = components.get("root") or ""
+          root_version = components.get("root_version") or ""
+          if root_name:
+              comp_lines.append(f"• Root: {root_name} {root_version}".rstrip())
+          susfs_version = components.get("susfs_version") or ""
+          if susfs_version:
+              comp_lines.append(f"• SUSFS {susfs_version}")
+          nomount_version = components.get("nomount_version") or ""
+          if nomount_version:
+              comp_lines.append(f"• NoMount {nomount_version}")
+
+          # Pull the key rows out of the release body table.
+          keep_prefixes = (
+              "| **Kernel**", "| **Release**", "| **Clang**",
+              "| **Root**", "| **SUSFS**", "| **NoMount**",
+          )
+          body_lines = []
+          for raw in body.splitlines():
+              if not raw.strip().startswith(keep_prefixes):
+                  continue
+              # Turn a markdown table row into "Kernel: value".
+              cells = [c.strip() for c in raw.strip().strip("|").split("|")]
+              if len(cells) < 2:
+                  continue
+              key = cells[0].replace("**", "")
+              value = cells[1].replace("**", "")
+              body_lines.append(f"• {html.escape(key)}: {html.escape(value)}")
+
+          quote_lines = [f"• Zyte Kernel v{html.escape(version)}"]
+          quote_lines.append("• Redmi 10 / 2022 / Prime (selene) · MT6768")
+          if comp_lines:
+              # Versions from the stats file, then kernel/release/clang rows.
+              quote_lines.extend(comp_lines)
+              quote_lines.extend(body_lines[:3])
+          else:
+              # No component info available - use the release body rows.
+              quote_lines.extend(body_lines)
+          changelog = "\n".join(quote_lines)[:600]
 
           stat_parts = []
           secs = int(stats.get("compile_seconds") or 0)

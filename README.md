@@ -48,6 +48,21 @@ git clone --depth 1 --branch lineage-24.0 \
 `build.sh` fetches what it needs on its own: the Neutron Clang toolchain and the
 AnyKernel3 template are downloaded/cloned if they are missing.
 
+### Component versions
+
+The build resolves the upstream version of every component and shows it in the
+release notes, the run summary and the Telegram post - no commit hashes needed:
+
+| Component | Version | Source |
+|-----------|---------|--------|
+| BakaSU | `v4.2.0-rc3` | nearest tag in `Baka-SU/BakaSU@main` |
+| SUSFS | `v2.4.0` | the SUSFS release the integration is based on |
+| NoMount | `v2.3.1` | nearest tag in `maxsteeel/nomount@dev` |
+
+`build.sh` finds them with `git describe --tags --abbrev=0` (the root clone is
+deepened by 300 commits so the tag is reachable) and writes them to
+`out/build-stats.json`, which the release body and the Telegram workflow read.
+
 ### Build progress
 
 The compile step counts kbuild's own progress lines (`CC`, `AS`, `HOSTCC`) and shows

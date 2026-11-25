@@ -21,6 +21,9 @@ LOG="$OUT/build.log"
 # kernel.string and the release notes all agree with the artwork.
 DEVICE_NAME="Redmi 10 / 2022 / Prime"
 
+# SUSFS release this integration is based on.
+SUSFS_VERSION="v2.4.0"
+
 # Zyte release version (see the VERSION file). Bump it there; it ends up in
 # the kernel release string, the zip name, the GitHub release and Telegram.
 ZYTE_VERSION="${ZYTE_VERSION:-}"
@@ -568,6 +571,38 @@ reset_integration() {
 # -----------------------------------------------------------------------------
 # CI Integration: clone KazeSU, integrate SUSFS, set up NoMount
 # -----------------------------------------------------------------------------
+# Resolve the upstream version of a component checkout: the tag on HEAD, or
+# the nearest tag in its history (e.g. "v4.2.0-rc3" for a commit that is 114
+# commits ahead of that tag). Empty when the checkout has no tags.
+resolve_component_version() {
+    local dir="$1" tag=""
+    [[ -d "$dir/.git" ]] || return 0
+    tag="$(git -C "$dir" tag --points-at HEAD 2>/dev/null | grep -E '^v[0-9]' | sort -V | tail -n1 || true)"
+    if [[ -z "$tag" ]]; then
+        tag="$(git -C "$dir" describe --tags --abbrev=0 2>/dev/null || true)"
+    fi
+    printf '%s' "$tag"
+}
+
+# Versions + commits of everything that goes into the kernel. Filled in both
+# the integration step and the build step, so the release notes and the
+# Telegram post can show "BakaSU v4.2.0-rc3" instead of a bare commit hash.
+component_versions() {
+    local root_dir="$SRC/BakaSU" nomount_dir="$SRC/NoMount"
+    [[ "$ROOT_IMPL" == "kazesu" ]] && root_dir="$SRC/KazeSU"
+
+    ROOT_NAME="$ROOT_IMPL"
+    [[ "$ROOT_IMPL" == "bakasu" ]] && ROOT_NAME="BakaSU"
+    [[ "$ROOT_IMPL" == "kazesu" ]] && ROOT_NAME="KazeSU"
+
+    ROOT_VERSION="$(resolve_component_version "$root_dir")"
+    ROOT_COMMIT="$(git -C "$root_dir" rev-parse --short=12 HEAD 2>/dev/null || echo none)"
+    NOMOUNT_VERSION="$(resolve_component_version "$nomount_dir")"
+    NOMOUNT_COMMIT="$(git -C "$nomount_dir" rev-parse --short=12 HEAD 2>/dev/null || echo none)"
+
+    export ROOT_NAME ROOT_VERSION ROOT_COMMIT NOMOUNT_VERSION NOMOUNT_COMMIT SUSFS_VERSION
+}
+
 integrate_root() {
     # Root implementation: KazeSU/OriginSU (legacy branch) or BakaSU (main).
     local repo branch
@@ -589,6 +624,11 @@ integrate_root() {
         rm -rf "$ROOT_DIR"
         git clone --depth 1 --branch "$branch" "$repo" "$ROOT_DIR"
         [[ -d "$ROOT_DIR/kernel" ]] || die "$ROOT_IMPL clone did not create $ROOT_IMPL/kernel"
+        # A depth-1 clone has no history, so `git describe` cannot tell which
+        # release the checkout is based on. Deepen it (the tags are ~100
+        # commits back) and fetch the tag refs.
+        git -C "$ROOT_DIR" fetch --quiet --deepen 300 origin "$branch" 2>/dev/null || true
+        git -C "$ROOT_DIR" fetch --quiet --tags origin 2>/dev/null || true
         ok "$ROOT_IMPL cloned at $(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
     fi
 
@@ -765,13 +805,20 @@ verify_integration() {
         fi
     fi
 
-    KAZESU_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
-    NOMOUNT_COMMIT="$(git -C "$SRC/NoMount" rev-parse --short=12 HEAD 2>/dev/null || echo none)"
+    component_versions
+    KAZESU_COMMIT="$ROOT_COMMIT"
+    NOMOUNT_COMMIT="$NOMOUNT_COMMIT"
     echo "KAZESU_COMMIT=$KAZESU_COMMIT"
+    echo "KAZESU_VERSION=${ROOT_VERSION:-unknown}"
     echo "NOMOUNT_COMMIT=$NOMOUNT_COMMIT"
+    echo "NOMOUNT_VERSION=${NOMOUNT_VERSION:-unknown}"
+    echo "SUSFS_VERSION=$SUSFS_VERSION"
     if [[ -n "${GITHUB_ENV:-}" ]]; then
         echo "KAZESU_COMMIT=$KAZESU_COMMIT" >> "$GITHUB_ENV"
+        echo "KAZESU_VERSION=${ROOT_VERSION:-unknown}" >> "$GITHUB_ENV"
         echo "NOMOUNT_COMMIT=$NOMOUNT_COMMIT" >> "$GITHUB_ENV"
+        echo "NOMOUNT_VERSION=${NOMOUNT_VERSION:-unknown}" >> "$GITHUB_ENV"
+        echo "SUSFS_VERSION=$SUSFS_VERSION" >> "$GITHUB_ENV"
     fi
 }
 
@@ -1167,13 +1214,20 @@ compile_kernel() {
     fi
 
     # Machine-readable stats for the release body and the Telegram post.
+    component_versions
     {
         printf '{"variant":"%s","jobs":%s,"compile_seconds":%s,"units":%s' \
             "$BUILD_VARIANT" "$JOBS" "$COMPILE_SECONDS" "$units_seen"
         if [[ -n "$ccache_rate" ]]; then
             printf ',"ccache_hit_rate":%s' "$ccache_rate"
         fi
-        printf '}\n'
+        printf ',"components":{'
+        printf '"root":"%s","root_version":"%s","root_commit":"%s"' \
+            "$ROOT_NAME" "$ROOT_VERSION" "$ROOT_COMMIT"
+        printf ',"susfs_version":"%s"' "$SUSFS_VERSION"
+        printf ',"nomount_version":"%s","nomount_commit":"%s"' \
+            "$NOMOUNT_VERSION" "$NOMOUNT_COMMIT"
+        printf '}}\n'
     } > "$OUT/build-stats.json"
 }
 
