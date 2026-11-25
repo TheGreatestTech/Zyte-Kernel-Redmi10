@@ -35,6 +35,9 @@ JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 # Load limit for make (prevents overloading the system). 0 = no limit.
 # Can be overridden with MAKE_LOAD_LIMIT env var or --load-limit arg.
 MAKE_LOAD_LIMIT="${MAKE_LOAD_LIMIT:-0}"
+# Expected number of compiled translation units, used by the build progress bar.
+# Auto-calibrated after the first clean build (see expected_units).
+BUILD_UNITS="${BUILD_UNITS:-}"
 
 DO_CLEAN=0
 DO_RECONFIG=0
@@ -229,6 +232,8 @@ usage() {
 
   Options:
     -j, --jobs N           Parallel jobs (default: $(nproc 2>/dev/null || echo 4))
+        --units N          Expected compile units for the progress bar
+                           (default: auto - remembered from the last clean build)
     -c, --clean            Delete out/ and do a clean rebuild
     -r, --reconfig         Regenerate .config from vendor/mt6768_defconfig + vendor/selene.config
     -m, --menuconfig       Open menuconfig before building
@@ -298,6 +303,15 @@ while (($#)); do
             VERBOSE=1
             shift
             ;;
+        --units)
+            [[ $# -ge 2 ]] || die "$1 needs a value"
+            BUILD_UNITS="$2"
+            shift 2
+            ;;
+        --units=*)
+            BUILD_UNITS="${1#*=}"
+            shift
+            ;;
         --load-limit)
             [[ $# -ge 2 ]] || die "$1 needs a value"
             MAKE_LOAD_LIMIT="$2"
@@ -344,6 +358,7 @@ while (($#)); do
 done
 
 [[ "$JOBS" =~ ^[0-9]+$ ]] && (( JOBS > 0 )) || die "Invalid job count: $JOBS"
+[[ -z "$BUILD_UNITS" ]] || [[ "$BUILD_UNITS" =~ ^[0-9]+$ && "$BUILD_UNITS" -gt 0 ]] || die "Invalid unit count: $BUILD_UNITS"
 
 case "$BUILD_VARIANT" in
     base|all-in-one|kazesu|root|root-nomount) ;;
@@ -971,6 +986,19 @@ configure_kernel() {
 # -----------------------------------------------------------------------------
 # Compilation
 # -----------------------------------------------------------------------------
+# How many compile units to expect? Explicit > remembered > a sane default
+# (a clean selene all-in-one build compiles ~3.3k units).
+expected_units() {
+    local f="$ROOT/.build-logs/units-${BUILD_VARIANT}.txt"
+    if [[ -n "${BUILD_UNITS:-}" ]]; then
+        printf '%s' "$BUILD_UNITS"
+    elif [[ -s "$f" ]] && [[ "$(tr -dc '0-9' < "$f")" =~ ^[0-9]+$ ]]; then
+        tr -dc '0-9' < "$f"
+    else
+        printf '3400'
+    fi
+}
+
 compile_kernel() {
     section "Compilation"
     info "Building Image.gz-dtb with -j$JOBS"
@@ -997,60 +1025,128 @@ compile_kernel() {
     fi
     make_cmd+=(Image.gz-dtb)
 
-    local start now elapsed i=0 last bar_len=30
-    # ASCII-compatible spinner frames
-    local -a spin=('|' '/' '-' '\\' '|' '/' '-' '\\')
+    local start now elapsed
+    local units_total units_seen=0 offset=0 last_pct=-1 bar_len=26
+    local BAR_FULL='█' BAR_EMPTY='░'
+    case "${LC_ALL:-${LANG:-}}" in
+        *UTF-8*|*utf8*|*UTF8*) ;;
+        *) BAR_FULL='#'; BAR_EMPTY='-' ;;
+    esac
+    local PCT=0 RATE=0 ETA=0 LAST=""
+    units_total="$(expected_units)"
     start="$(date +%s)"
+
+    # Count the compile units kbuild has finished so far. Only the new bytes of
+    # the log are scanned, so this stays cheap even on a 20 MB log.
+    count_units() {
+        local size added
+        size="$(stat -c %s "$LOG" 2>/dev/null || echo 0)"
+        (( size > offset )) || return 0
+        added="$(tail -c +$((offset + 1)) "$LOG" 2>/dev/null \
+            | grep -cE '^  (CC|AS|HOSTCC) ' || true)"
+        offset="$size"
+        units_seen=$(( units_seen + added ))
+    }
+
+    render_bar() {
+        local pct="$1" width="$2" fill empty out=""
+        fill=$(( pct * width / 100 ))
+        if (( fill > width )); then
+            fill="$width"
+        fi
+        empty=$(( width - fill ))
+        # printf with an empty arg list still prints the format once, hence
+        # the explicit guards (0% would otherwise emit one full block).
+        if (( fill > 0 )); then
+            out+="$(printf "$BAR_FULL%.0s" $(seq 1 "$fill"))"
+        fi
+        if (( empty > 0 )); then
+            out+="$(printf "$BAR_EMPTY%.0s" $(seq 1 "$empty"))"
+        fi
+        printf '%s' "$out"
+    }
+
+    progress_stats() {
+        local secs
+        count_units
+        secs=$(( $(date +%s) - start )); (( secs > 0 )) || secs=1
+        # An estimate can undershoot (incremental builds, config changes):
+        # grow it rather than showing "67/12" and a nonsense percentage.
+        if (( units_seen > units_total )); then
+            units_total="$units_seen"
+        fi
+        PCT=$(( units_seen * 100 / units_total ))
+        if (( PCT > 99 )); then
+            PCT=99
+        fi
+        RATE=$(( units_seen * 60 / secs ))
+        if (( RATE > 0 && units_seen < units_total )); then
+            ETA=$(( (units_total - units_seen) * 60 / RATE ))
+        else
+            ETA=0
+        fi
+        LAST="$(grep -E '^  (CC|AS|HOSTCC) ' "$LOG" 2>/dev/null | tail -n1 \
+            | sed 's/^  [A-Z]*  *//' || true)"
+    }
 
     if (( VERBOSE == 1 )); then
         if ! "${make_cmd[@]}" 2>&1 | tee -a "$LOG"; then
-            build_failed "Compilation failed"
-        fi
-    elif [[ ! -t 1 ]]; then
-        # Non-interactive (CI / captured output): keep the log clean.
-        if ! "${make_cmd[@]}" >>"$LOG" 2>&1; then
             build_failed "Compilation failed"
         fi
     else
         "${make_cmd[@]}" >>"$LOG" 2>&1 &
         BUILD_PID=$!
 
-        while kill -0 "$BUILD_PID" 2>/dev/null; do
-            now="$(date +%s)"
-            elapsed=$((now - start))
-            last="$(tail -n 8 "$LOG" 2>/dev/null | tr -d '\r' \
-                | sed -n 's/^  \([A-Z][A-Z]*\)[[:space:]]\+/\1 /p' | tail -n1)"
-            [[ -n "$last" ]] || last="compiling..."
-            last="${last:0:50}"
-
-            # Progress bar (indeterminate, bouncing)
-            local pos=$(( (i * 2) % (bar_len * 2) ))
-            local bar=""
-            if (( pos < bar_len )); then
-                bar="$(printf '%*s' $pos | tr ' ' '=')$(printf '%*s' $((bar_len - pos)) | tr ' ' ' ')"
-            else
-                local rev=$((bar_len * 2 - pos))
-                bar="$(printf '%*s' $rev | tr ' ' ' ')$(printf '%*s' $((bar_len - rev)) | tr ' ' '=')"
-            fi
-
-            printf '\r\033[2K  %s%s%s %s%s%s  %s[%s%s]%s  %s' \
-                "$INF" "${spin[i]}" "$R" \
-                "$(fmt_duration "$elapsed")" "$R" \
-                "$DIM" "$ACC" "$bar" "$DIM" "$R" \
-                "$DIM$last$R"
-            i=$(((i + 1) % 8))
-            sleep 0.12
-        done
+        if [[ -t 1 ]]; then
+            # Interactive: a live, in-place bar.
+            while kill -0 "$BUILD_PID" 2>/dev/null; do
+                progress_stats
+                printf '\r\033[2K  %s%3d%%%s %s%s%s %s%5d/%-5d%s %s%s u/min%s %sETA %s%s %s%s%s' \
+                    "$INF" "$PCT" "$R" \
+                    "$ACC" "$(render_bar "$PCT" "$bar_len")" "$R" \
+                    "$DIM" "$units_seen" "$units_total" "$R" \
+                    "$DIM" "$RATE" "$R" \
+                    "$DIM" "$(fmt_duration "$ETA")" "$R" \
+                    "$DIM" "${LAST:0:46}" "$R"
+                sleep 0.25
+            done
+            printf '\r\033[2K'
+        else
+            # CI / piped output: one line per 5%, so the log stays readable.
+            printf '  %s[  0%%]%s 0/%d compile units (bar updates every 5%%)\n' \
+                "$INF" "$R" "$units_total"
+            while kill -0 "$BUILD_PID" 2>/dev/null; do
+                progress_stats
+                if (( PCT >= last_pct + 5 )); then
+                    printf '  %s[%3d%%]%s %s %5d/%-5d %s u/min  ETA %-6s %s\n' \
+                        "$INF" "$PCT" "$R" "$(render_bar "$PCT" 20)" \
+                        "$units_seen" "$units_total" "$RATE" \
+                        "$(fmt_duration "$ETA")" "${LAST:0:46}"
+                    last_pct="$PCT"
+                fi
+                sleep 2
+            done
+        fi
 
         set +e
         wait "$BUILD_PID"
         local rc=$?
         set -e
         BUILD_PID=""
-        printf '\r\033[2K'
 
         if (( rc != 0 )); then
             build_failed "Compilation failed"
+        fi
+
+        count_units
+        printf '  %s[100%%]%s %s %d compile units in %s\n' \
+            "$INF" "$R" "$(render_bar 100 20)" "$units_seen" \
+            "$(fmt_duration $(( $(date +%s) - start )))"
+
+        # Remember the real unit count so the next clean build's bar is exact.
+        if (( DO_CLEAN == 1 && units_seen > 500 )); then
+            mkdir -p "$ROOT/.build-logs"
+            printf '%s\n' "$units_seen" > "$ROOT/.build-logs/units-${BUILD_VARIANT}.txt"
         fi
     fi
 

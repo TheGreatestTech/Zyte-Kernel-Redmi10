@@ -48,6 +48,24 @@ git clone --depth 1 --branch lineage-24.0 \
 `build.sh` fetches what it needs on its own: the Neutron Clang toolchain and the
 AnyKernel3 template are downloaded/cloned if they are missing.
 
+### Build progress
+
+The compile step counts kbuild's own progress lines (`CC`, `AS`, `HOSTCC`) and shows
+how far along the build really is:
+
+```
+# interactive terminal - live, in place
+  35% ██████████░░░░░░░░░░░░░░░░  1187/3400  92 u/min  ETA 24m00s  drivers/gpu/drm/panel/panel-simple.o
+
+# CI / piped output - one line per 5%, so the Actions log stays readable
+  [ 35%] ███████░░░░░░░  1187/3400  92 u/min  ETA 24m00s  drivers/gpu/drm/panel/panel-simple.o
+```
+
+Only the new bytes of `out/build.log` are scanned, so the counter costs nothing even on a
+20 MB log. The expected unit count is remembered from the last clean build
+(`.build-logs/units-<variant>.txt`) - a clean selene all-in-one build is ~3.3k units.
+Override it with `--units N` or `BUILD_UNITS=N`.
+
 Output lands in `out/`:
 
 * `out/arch/arm64/boot/Image.gz-dtb` - kernel + DTB + DTBO
