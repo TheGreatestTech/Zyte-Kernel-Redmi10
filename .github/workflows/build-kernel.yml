@@ -363,6 +363,38 @@ jobs:
             echo "| Release token | ${RELEASE_TOKEN_SOURCE:-unknown} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Fetch BakaSU manager APK
+        # The manager APK is a nice-to-have: a missing Telegram session or an
+        # empty topic must never break the kernel release.
+        continue-on-error: true
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+          APK_CHANNEL: BakaSU_Grp
+          APK_TOPIC: '4'
+          APK_ARCH: arm64-v8a
+          APK_META: releases/bakasu-apk.json
+        run: |
+          set -Eeuo pipefail
+          mkdir -p releases
+          # A venv keeps the runner's python clean (newer Ubuntu images are
+          # PEP 668 protected).
+          if python3 -m venv /tmp/tgvenv 2>/dev/null; then
+            /tmp/tgvenv/bin/pip install --quiet --disable-pip-version-check telethon
+            TG_PY=/tmp/tgvenv/bin/python
+          else
+            python3 -m pip install --quiet --disable-pip-version-check --break-system-packages telethon
+            TG_PY=python3
+          fi
+          "$TG_PY" scripts/fetch-bakasu-apk.py
+          if [[ -f releases/bakasu-apk.json ]]; then
+            echo "BakaSU APK:"
+            cat releases/bakasu-apk.json
+          else
+            echo "::warning::No BakaSU APK was fetched - the release will not include it"
+          fi
+
       - name: Verify release files and generate checksums
         run: |
           set -Eeuo pipefail
@@ -372,7 +404,8 @@ jobs:
             printf '%s\n' "${ZIPS[@]}"
             exit 1
           }
-          (cd releases && sha256sum ./*.zip > SHA256SUMS)
+          (cd releases && find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.apk' \) \
+            -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           cat releases/SHA256SUMS
 
       - name: Prepare release body
@@ -408,10 +441,11 @@ jobs:
 
           ---
           ### 📥 Installation
-          1. Download the `Zyte-Kernel-*.zip` from this release
-          2. Verify SHA-256 checksum (see `SHA256SUMS`)
-          3. Flash via **TWRP** / **OrangeFox** / any custom recovery
-          4. Reboot
+          1. Download the `Zyte-Kernel-*.zip` and the BakaSU manager APK from this release
+          2. Verify the SHA-256 checksums (see `SHA256SUMS`)
+          3. Flash the kernel zip via **TWRP** / **OrangeFox** / any custom recovery
+          4. Install the manager APK on the phone
+          5. Reboot
 
           > ⚠️ **Note:** This kernel is for **Redmi 10 / 2022 / Prime (selene)** only.
 
@@ -426,14 +460,40 @@ jobs:
           Built with ❤️ using GitHub Actions
           BODY
 
+          # Add the manager APK row when the APK was fetched.
+          if [[ -f releases/bakasu-apk.json ]]; then
+            python3 - <<'PY'
+          import json
+          import re
+
+          with open("releases/bakasu-apk.json", encoding="utf-8") as fh:
+              apk = json.load(fh)
+
+          version = apk.get("version") or "unknown"
+          row = (f"| **Manager** | BakaSU `v{version}` "
+                 f"(`{apk.get('arch', 'arm64-v8a')}` APK, {apk.get('size', 0) // 1048576} MiB) |")
+
+          path = "releases/RELEASE_BODY.md"
+          with open(path, encoding="utf-8") as fh:
+              body = fh.read()
+          body = re.sub(r"^(\| \*\*NoMount\*\* .*\|)$",
+                        lambda m: m.group(1) + "\n" + row,
+                        body, count=1, flags=re.M)
+          with open(path, "w", encoding="utf-8") as fh:
+              fh.write(body)
+          PY
+          fi
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Zyte-Kernel-v${{ env.ZYTE_VERSION }}-${{ env.BUILD_DATE }}
           path: |
             releases/*.zip
+            releases/*.apk
             releases/SHA256SUMS
             releases/build-stats.json
+            releases/bakasu-apk.json
             releases/logs/*.log
           if-no-files-found: error
           retention-days: 30
@@ -451,7 +511,7 @@ jobs:
           # Collect the assets without `ls` parsing, and fail loudly if the
           # package is missing instead of publishing an empty release.
           mapfile -t ASSET_FILES < <(find releases -maxdepth 1 -type f \
-            \( -name '*.zip' -o -name 'SHA256SUMS' \) | sort)
+            \( -name '*.zip' -o -name '*.apk' -o -name 'SHA256SUMS' \) | sort)
           [[ "${#ASSET_FILES[@]}" -ge 1 ]] || {
             echo '::error::No release assets found in releases/'
             exit 1

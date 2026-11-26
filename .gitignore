@@ -18,3 +18,7 @@
 # Local build logs
 /.build-logs/
 /.worktrees/
+
+# Python bytecode
+__pycache__/
+*.pyc

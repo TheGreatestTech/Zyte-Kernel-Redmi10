@@ -175,6 +175,28 @@ to the second token if the first one cannot publish.
 > *Workflows: Read and write*. A tag-only probe does **not** catch this, which is why the
 > preflight now creates a draft release too.
 
+### BakaSU manager APK
+
+The build also grabs the latest BakaSU **manager APK** (`arm64-v8a`) from the
+`@BakaSU_Grp` topic `4` and publishes it next to the kernel: it is attached to
+the GitHub release, added to the artifact and sent to Telegram.
+
+That group has no public web preview, so the file can only be read over
+MTProto with a user session. Three repository secrets are needed:
+
+| Secret | Where it comes from |
+|--------|---------------------|
+| `TELEGRAM_API_ID` | [my.telegram.org](https://my.telegram.org) → API Development Tools |
+| `TELEGRAM_API_HASH` | same page |
+| `TELEGRAM_SESSION` | `python3 scripts/telegram-login.py` (run locally once) |
+
+The session string is printed by the login helper - put it into
+*Settings → Secrets and variables → Actions*. The account must be a member of
+`@BakaSU_Grp` (a public group is enough).
+
+Without the secrets the step is skipped with a warning: the kernel release
+still publishes, just without the manager APK.
+
 ### CI performance
 
 * **ccache is real now** - `ccache-action` saves under `<key>-<timestamp>`, so the exact
