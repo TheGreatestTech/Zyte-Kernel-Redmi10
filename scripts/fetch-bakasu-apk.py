@@ -98,26 +98,37 @@ async def main():
         await client.disconnect()
         return 0
 
-    fallback = None
-    for msg in messages or []:
-        doc = getattr(msg, "document", None)
-        if not doc:
-            continue
-        name = getattr(doc, "file_name", None) or ""
-        if not name.lower().endswith(".apk"):
-            continue
-        if arch_matches(name):
-            fallback = (msg, name)
-            break
-        if fallback is None:
-            fallback = (msg, name)
+    def find_apk(candidates):
+        """Newest APK for the wanted architecture (never a wrong one)."""
+        for msg in candidates or []:
+            doc = getattr(msg, "document", None)
+            if not doc:
+                continue
+            name = getattr(doc, "file_name", None) or ""
+            if not name.lower().endswith(".apk"):
+                continue
+            if arch_matches(name):
+                return msg, name
+        return None
 
-    if not fallback:
-        print(f"::warning::No APK found in @{CHANNEL} topic {TOPIC} - skipping")
+    found = find_apk(messages)
+
+    if not found:
+        # The topic filter may not work for every forum setup - scan the whole
+        # chat as a fallback.
+        try:
+            print(f"[fallback] scanning the whole @{CHANNEL} chat")
+            everything = await client.get_messages(CHANNEL, limit=LIMIT * 3)
+            found = find_apk(everything)
+        except Exception as exc:
+            print(f"::warning::Could not scan @{CHANNEL}: {exc}")
+
+    if not found:
+        print(f"::warning::No {ARCH} APK found in @{CHANNEL} (topic {TOPIC}) - skipping")
         await client.disconnect()
         return 0
 
-    msg, name = fallback
+    msg, name = found
     print(f"Found: {name} (message {msg.id}, {getattr(msg, 'date', '?')})")
     try:
         saved = await client.download_media(msg, file=tmp_out)
