@@ -212,16 +212,6 @@ jobs:
                       apk_meta = {}
                   break
 
-          # Only the ccache hit rate - the build time and the compile unit
-          # count are for the run summary, not for the channel.
-          stat_parts = []
-          rate = stats.get("ccache_hit_rate")
-          if rate not in (None, ""):
-              filled = max(0, min(10, round(float(rate) / 10)))
-              bar = "█" * filled + "░" * (10 - filled)
-              stat_parts.append(f"ccache <code>{bar}</code> {float(rate):.0f}%")
-          build_line = " · ".join(stat_parts)
-
           # SHA-256 of the package we are about to upload.
           sha256 = ""
           if zip_path and os.path.exists(zip_path):
@@ -242,7 +232,6 @@ jobs:
               f"<i>Redmi 10 / 2022 / Prime (selene) · MT6768</i>\n"
               + (f"<i>\U0001F4F1 Manager: BakaSU v{html.escape(apk_meta.get('version') or 'unknown')}"
                  f" ({html.escape(apk_meta.get('arch') or 'arm64-v8a')})</i>\n" if apk_meta else "")
-              + (f"<i>{build_line}</i>\n" if build_line else "")
               + f"\n<blockquote>{changelog}</blockquote>"
           )
           if sha256:
