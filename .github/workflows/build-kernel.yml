@@ -337,8 +337,18 @@ jobs:
                 parts.append("ccache %s%%" % rate)
             print(" · ".join(parts))
             ')"
-            # Keep it in this step *and* in the environment of the later steps.
+            # The public part (release notes, Telegram) only carries the
+            # ccache hit rate - the build time and the unit count are noise
+            # for the users and stay in the run summary.
+            BUILD_STATS_PUBLIC="$(python3 -c '
+            import json
+            d = json.load(open("out/build-stats.json"))
+            rate = d.get("ccache_hit_rate")
+            print("ccache %s%%" % rate if rate not in (None, "") else "cold build")
+            ')"
+            # Keep them in this step *and* in the environment of the later steps.
             echo "BUILD_STATS=$BUILD_STATS" >> "$GITHUB_ENV"
+            echo "BUILD_STATS_PUBLIC=$BUILD_STATS_PUBLIC" >> "$GITHUB_ENV"
             echo "Build stats: $BUILD_STATS"
           fi
 
@@ -429,7 +439,7 @@ jobs:
           | **Root** | `${{ env.KAZESU_VERSION || 'unknown' }}` (BakaSU @ `${{ env.KAZESU_COMMIT }}`) |
           | **SUSFS** | `${{ env.SUSFS_VERSION || 'n/a' }}` |
           | **NoMount** | `${{ env.NOMOUNT_VERSION || 'n/a' }}` (`${{ env.NOMOUNT_COMMIT }}`) |
-          | **Build** | ${{ env.BUILD_STATS }} |
+          | **Build** | ${{ env.BUILD_STATS_PUBLIC }} |
 
           ---
           ### 🏗️ Build Configuration

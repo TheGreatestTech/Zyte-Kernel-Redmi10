@@ -212,13 +212,9 @@ jobs:
                       apk_meta = {}
                   break
 
+          # Only the ccache hit rate - the build time and the compile unit
+          # count are for the run summary, not for the channel.
           stat_parts = []
-          secs = int(stats.get("compile_seconds") or 0)
-          if secs:
-              stat_parts.append(f"⏱ {secs // 60}m{secs % 60:02d}s")
-          units = int(stats.get("units") or 0)
-          if units:
-              stat_parts.append(f"⚙ {units:,} units")
           rate = stats.get("ccache_hit_rate")
           if rate not in (None, ""):
               filled = max(0, min(10, round(float(rate) / 10)))
