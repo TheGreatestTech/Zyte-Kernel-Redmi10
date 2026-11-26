@@ -232,34 +232,63 @@ jobs:
           if sha256:
               caption += f"\n\n<code>SHA256\n{sha256}</code>"
 
-          # One single message: the flashable zip itself, with the banner as
-          # its thumbnail and the whole announcement as its caption.
+          # ------------------------------------------------------------------
+          # 1. the banner photo with the announcement
+          # 2. the flashable zip as a document right below it
+          # 3. a link in the caption that jumps straight to the file
+          #
+          # Telegram cannot attach a file to a photo message (and albums may
+          # not mix photos with documents), so the file is a second message and
+          # the caption of the photo gets a link to it.
+          # ------------------------------------------------------------------
           banner_path = ".github/assets/zyte_banner.png"
           thumb_path = ".github/assets/zyte_banner_thumb.png"
+          zip_name = os.path.basename(zip_path) if zip_path else ""
 
-          if zip_path and os.path.exists(zip_path):
-              files = {"document": (os.path.basename(zip_path), open(zip_path, "rb"))}
-              if os.path.exists(thumb_path):
-                  files["thumbnail"] = ("thumbnail.png", open(thumb_path, "rb"), "image/png")
-              r = requests.post(
-                  f"https://api.telegram.org/bot{token}/sendDocument",
-                  data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
-                  files=files,
-                  timeout=300,
+          # A link to a message: t.me/<username>/<id> for a public channel,
+          # t.me/c/<internal id>/<id> otherwise.
+          chat_ref = str(chat_id)
+          internal_id = chat_ref[4:] if chat_ref.startswith("-100") else chat_ref
+          chat_link_base = f"https://t.me/c/{internal_id}"
+          try:
+              cr = requests.post(
+                  f"https://api.telegram.org/bot{token}/getChat",
+                  data={"chat_id": chat_id},
+                  timeout=30,
               )
-              r.raise_for_status()
-          elif os.path.exists(banner_path):
-              # No package available - post the banner with the same caption.
+              username = (cr.json().get("result") or {}).get("username") or ""
+              if username:
+                  chat_link_base = f"https://t.me/{username}"
+          except Exception:
+              pass
+
+          photo_msg_id = None
+          doc_msg_id = None
+
+          if os.path.exists(banner_path):
+              # 1. the announcement
               with open(banner_path, "rb") as img:
                   r = requests.post(
                       f"https://api.telegram.org/bot{token}/sendPhoto",
                       data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
                       files={"photo": img},
-                      timeout=60,
+                      timeout=120,
                   )
               r.raise_for_status()
+              photo_msg_id = (r.json().get("result") or {}).get("message_id")
+          elif zip_path and os.path.exists(zip_path):
+              # No banner in the repo - the file carries the announcement.
+              doc_caption = caption
+              with open(zip_path, "rb") as fh:
+                  r = requests.post(
+                      f"https://api.telegram.org/bot{token}/sendDocument",
+                      data={"chat_id": chat_id, "caption": doc_caption, "parse_mode": "HTML"},
+                      files={"document": (zip_name, fh)},
+                      timeout=300,
+                  )
+              r.raise_for_status()
+              doc_msg_id = (r.json().get("result") or {}).get("message_id")
           else:
-              # No banner and no package - still deliver the message itself.
               r = requests.post(
                   f"https://api.telegram.org/bot{token}/sendMessage",
                   data={
@@ -271,4 +300,45 @@ jobs:
                   timeout=60,
               )
               r.raise_for_status()
+
+          # 2. the flashable package
+          if zip_path and os.path.exists(zip_path) and photo_msg_id:
+              doc_caption = f"<b>Zyte Kernel v{html.escape(version)}</b>\n{html.escape(zip_name)}"
+              if sha256:
+                  doc_caption += f"\n<code>SHA256: {sha256}</code>"
+              files = {"document": (zip_name, open(zip_path, "rb"))}
+              if os.path.exists(thumb_path):
+                  files["thumbnail"] = ("thumbnail.png", open(thumb_path, "rb"), "image/png")
+              r = requests.post(
+                  f"https://api.telegram.org/bot{token}/sendDocument",
+                  data={"chat_id": chat_id, "caption": doc_caption, "parse_mode": "HTML"},
+                  files=files,
+                  timeout=300,
+              )
+              r.raise_for_status()
+              doc_msg_id = (r.json().get("result") or {}).get("message_id")
+
+          # 3. link the announcement to the file
+          if photo_msg_id and doc_msg_id and chat_link_base:
+              link = f"{chat_link_base}/{doc_msg_id}"
+              linked = (
+                  caption
+                  + f"\n\n<b>Package:</b>\n"
+                  + f'<a href="{html.escape(link)}">\U0001F4E6 {html.escape(zip_name)}</a>'
+              )
+              try:
+                  r = requests.post(
+                      f"https://api.telegram.org/bot{token}/editMessageCaption",
+                      data={
+                          "chat_id": chat_id,
+                          "message_id": photo_msg_id,
+                          "caption": linked,
+                          "parse_mode": "HTML",
+                      },
+                      timeout=60,
+                  )
+                  r.raise_for_status()
+              except Exception as exc:
+                  print(f"::warning::Could not add the package link: {exc}")
+
           EOF
