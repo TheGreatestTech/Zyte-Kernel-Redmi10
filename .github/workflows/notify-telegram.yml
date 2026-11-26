@@ -192,9 +192,19 @@ jobs:
               stat_parts.append(f"ccache <code>{bar}</code> {float(rate):.0f}%")
           build_line = " · ".join(stat_parts)
 
-          # The flashable zip is uploaded to the channel directly, so the post
-          # does not link the GitHub release assets - the package is the post.
-          if zip_path and os.path.exists(zip_path):
+          # The package links straight to the release asset, so tapping it
+          # starts the download and the post stays a single message. If the
+          # asset is missing, fall back to attaching the file itself.
+          asset_url = ""
+          if zip_name:
+              for asset in rel.get("assets", []):
+                  if asset.get("name") == zip_name:
+                      asset_url = asset.get("browser_download_url") or ""
+                      break
+          if asset_url:
+              package = (f'<a href="{html.escape(asset_url)}">'
+                         f'\U0001F4E6 {html.escape(zip_name)}</a>')
+          elif zip_path and os.path.exists(zip_path):
               package = f"\U0001F4E6 {html.escape(os.path.basename(zip_path))} (attached below)"
           else:
               package = f'<a href="{run_url}">Workflow Run</a>'
@@ -245,8 +255,9 @@ jobs:
               )
               r.raise_for_status()
 
-          # Attach the flashable zip itself when the artifact was downloadable.
-          if zip_path and os.path.exists(zip_path):
+          # Attach the flashable zip itself only when there is no direct
+          # download link - otherwise the channel gets a single message.
+          if not asset_url and zip_path and os.path.exists(zip_path):
               doc_caption = (f"<b>Zyte Kernel v{html.escape(version)}</b>\n"
                              f"{html.escape(os.path.basename(zip_path))}")
               if sha256:
