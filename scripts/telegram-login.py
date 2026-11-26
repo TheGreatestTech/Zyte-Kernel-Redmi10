@@ -14,11 +14,13 @@ The session gives full access to the Telegram account it was created with -
 use a dedicated account if that matters to you.
 """
 
+import asyncio
 import os
 import sys
 
 try:
     from telethon import TelegramClient
+    from telethon.errors import SessionPasswordNeededError
     from telethon.sessions import StringSession
 except ImportError:
     sys.exit("telethon is missing - install it with: pip install telethon")
@@ -33,21 +35,35 @@ missing = [n for n, v in (("TELEGRAM_API_ID", api_id),
 if missing:
     sys.exit("Missing: " + ", ".join(missing))
 
-client = TelegramClient(StringSession(), int(api_id), api_hash)
-client.connect()
 
-if not client.is_user_authorized():
-    sent = client.send_code_request(phone)
-    code = input("Enter the login code from Telegram: ").strip()
+async def main():
+    # Every Telethon method is a coroutine - they must be awaited.
+    client = TelegramClient(StringSession(), int(api_id), api_hash)
+    await client.connect()
+
     try:
-        client.sign_in(phone=phone, code=code, phone_code_hash=sent.phone_code_hash)
-    except Exception:
-        # 2FA: the password prompt only works on a TTY.
-        client.sign_in(password=input("Two-factor password: ").strip())
+        if not await client.is_user_authorized():
+            sent = await client.send_code_request(phone)
+            code = input("Enter the login code from Telegram: ").strip()
+            try:
+                await client.sign_in(phone=phone, code=code,
+                                     phone_code_hash=sent.phone_code_hash)
+            except SessionPasswordNeededError:
+                await client.sign_in(password=input("Two-factor password: ").strip())
+            print("Logged in.")
 
-print()
-print("Add this as the TELEGRAM_SESSION secret:")
-print()
-print(client.session.save())
-print()
-client.disconnect()
+        session = client.session.save()
+        if not session:
+            sys.exit("Could not create a session - check api_id/api_hash and the phone number.")
+
+        print()
+        print("Add this as the TELEGRAM_SESSION secret:")
+        print()
+        print(session)
+        print()
+    finally:
+        await client.disconnect()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

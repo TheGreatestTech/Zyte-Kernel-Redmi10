@@ -78,7 +78,10 @@ async def main():
         print("::warning::telethon is not installed - skipping the BakaSU APK")
         return 0
 
-    out = OUT or f"releases/{sanitize(f'BakaSU-manager-{ARCH}.apk')}"
+    # Download to a temporary name and rename it afterwards, so the release
+    # carries the original APK name (with its version in it).
+    tmp_out = OUT or "releases/.bakaSU-download.apk"
+    os.makedirs(os.path.dirname(tmp_out) or ".", exist_ok=True)
     client = TelegramClient(StringSession(session), int(api_id), api_hash)
 
     await client.connect()
@@ -115,18 +118,21 @@ async def main():
         return 0
 
     msg, name = fallback
-    target = out
     print(f"Found: {name} (message {msg.id}, {getattr(msg, 'date', '?')})")
     try:
-        saved = await client.download_media(msg, file=target)
+        saved = await client.download_media(msg, file=tmp_out)
     except Exception as exc:
         print(f"::warning::Could not download the APK: {exc}")
-        await client.disconnect()
         return 0
     finally:
         await client.disconnect()
 
-    saved = saved or target
+    saved = saved or tmp_out
+    target = OUT or f"releases/{sanitize(name)}"
+    if os.path.abspath(saved) != os.path.abspath(target):
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        os.replace(saved, target)
+        saved = target
     if not os.path.exists(saved):
         print("::warning::The APK was not written to disk - skipping")
         return 0
