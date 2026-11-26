@@ -66,13 +66,21 @@ body_excerpt() {
 }
 
 token_login() {
-    local code
+    local code repo_code
     code="$(api "$1" GET /user)"
     if [[ "$code" == "200" ]]; then
         json_field login
-    else
-        echo "invalid-token(HTTP $code)"
+        return 0
     fi
+    # GitHub App tokens (github-actions[bot]) cannot read /user at all - that
+    # is not a broken token. Probe the repository instead so a perfectly
+    # working token is not reported as "invalid".
+    repo_code="$(api "$1" GET "/repos/$REPO")"
+    if [[ "$repo_code" == "200" ]]; then
+        printf 'token(/user HTTP %s, repo access OK)' "$code"
+        return 0
+    fi
+    printf 'invalid-token(HTTP %s)' "$repo_code"
 }
 
 json_escape_file() {

@@ -180,6 +180,11 @@ to the second token if the first one cannot publish.
 * **ccache is real now** - `ccache-action` saves under `<key>-<timestamp>`, so the exact
   key never matches; `restore-keys` is what restores. It was missing, so every run
   recompiled everything. Keys are also variant/commit-agnostic so all builds share objects.
+* **ccache is actually invoked** - kbuild with `LLVM=1` does `CC = clang` inside the kernel
+  Makefile, and a makefile assignment beats the environment, so `CC="ccache clang"` was
+  silently ignored and the compiler ran uncached (the log even said *"Not saving cache
+  because no objects are cached"*). `build.sh` now puts a directory with `clang -> ccache`
+  symlinks in front of the toolchain in `PATH`, which intercepts every compiler call.
 * **Concurrency** cancels superseded runs (`cancel-in-progress`), and the job is capped at
   **120 min** instead of the 6 h default.
 * **Shallow, adaptive kernel fetch** - depth 1 (the pin is the branch tip), deepening to

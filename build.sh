@@ -475,18 +475,39 @@ preflight() {
     # every single build, even when nothing else changed.
     export KBUILD_BUILD_VERSION="${KBUILD_BUILD_VERSION:-1}"
 
-    # ccache setup (speeds up incremental builds significantly)
+    # ccache setup (speeds up rebuilds significantly)
     if command -v ccache >/dev/null 2>&1; then
         export CCACHE_DIR="${CCACHE_DIR:-$ROOT/.ccache}"
         export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-5G}"
         export CCACHE_COMPRESS=1
         export CCACHE_COMPRESSLEVEL=6
         export CCACHE_SLOPPINESS="time_macros,include_file_ctime,include_file_mtime,file_macro,file_stat_matches"
+        # Keep the cache valid even when the workspace path changes.
+        export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$ROOT}"
         ccache --max-size="$CCACHE_MAXSIZE" >/dev/null 2>&1 || true
         ccache -z >/dev/null 2>&1 || true  # zero stats for this build
-        export CC="ccache clang"
-        export HOSTCC="ccache clang"
-        info "ccache enabled (dir: $CCACHE_DIR, max: $CCACHE_MAXSIZE)"
+
+        # Kbuild with LLVM=1 does `CC = clang` inside the kernel Makefile,
+        # and a makefile assignment beats the environment - so "CC=ccache
+        # clang" is silently ignored and the compiler is called directly.
+        # The only reliable way to intercept every invocation is to put a
+        # directory with ccache symlinks (clang -> ccache) in front of the
+        # toolchain: ccache then finds the real clang further down the PATH.
+        local CCACHE_BIN="$OUT/.ccache-bin"
+        mkdir -p "$CCACHE_BIN"
+        local ccache_bin
+        ccache_bin="$(command -v ccache)"
+        for cc in clang clang++; do
+            ln -sf "$ccache_bin" "$CCACHE_BIN/$cc"
+        done
+        export PATH="$CCACHE_BIN:$PATH"
+
+        # Fail loudly instead of silently building without a cache.
+        if ! "$CCACHE_BIN/clang" --version >/dev/null 2>&1; then
+            warn "ccache wrapper does not work - continuing without ccache"
+        else
+            info "ccache enabled (dir: $CCACHE_DIR, max: $CCACHE_MAXSIZE, wrapper: $CCACHE_BIN)"
+        fi
     fi
 
     local tool
