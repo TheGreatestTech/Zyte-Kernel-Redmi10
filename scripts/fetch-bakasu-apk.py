@@ -37,18 +37,33 @@ OUT = os.environ.get("APK_OUT", "")
 META = os.environ.get("APK_META", "releases/bakasu-apk.json")
 
 
-def arch_matches(name):
-    """True when the file name looks like the wanted architecture."""
-    low = name.lower()
+def arch_preferences():
+    """Which architectures we accept, best first.
+
+    The channel posts both a per-architecture and a "universal" APK, so the
+    wanted architecture wins and "universal" is the fallback.
+    """
     want = ARCH.lower()
-    if want in low:
+    prefs = []
+    if want != "universal":
+        prefs.append(want)
+    prefs.append("universal")
+    return prefs
+
+
+def matches_arch(name, pref):
+    """True when the file name looks like the given architecture."""
+    low = name.lower()
+    if pref == "universal":
+        return "universal" in low
+    if pref in low:
         return True
-    # arm64 variants: "arm64", "aarch64", "64"
-    if want.startswith("arm64"):
+    # arm64 variants: "arm64", "aarch64"
+    if pref.startswith("arm64"):
         return any(a in low for a in ("arm64", "aarch64"))
-    if want.startswith("armeabi"):
+    if pref.startswith("armeabi"):
         return "armeabi" in low
-    if want in ("x86_64", "amd64"):
+    if pref in ("x86_64", "amd64"):
         return any(a in low for a in ("x86_64", "amd64", "x64"))
     return False
 
@@ -99,16 +114,23 @@ async def main():
         return 0
 
     def find_apk(candidates):
-        """Newest APK for the wanted architecture (never a wrong one)."""
+        """Newest APK for the wanted architecture (never a wrong one).
+
+        The per-architecture build is preferred, a "universal" one is the
+        fallback.
+        """
+        apks = []
         for msg in candidates or []:
             doc = getattr(msg, "document", None)
             if not doc:
                 continue
             name = getattr(doc, "file_name", None) or ""
-            if not name.lower().endswith(".apk"):
-                continue
-            if arch_matches(name):
-                return msg, name
+            if name.lower().endswith(".apk"):
+                apks.append((msg, name))
+        for pref in arch_preferences():
+            for msg, name in apks:
+                if matches_arch(name, pref):
+                    return msg, name, pref
         return None
 
     found = find_apk(messages)
@@ -128,8 +150,8 @@ async def main():
         await client.disconnect()
         return 0
 
-    msg, name = found
-    print(f"Found: {name} (message {msg.id}, {getattr(msg, 'date', '?')})")
+    msg, name, kind = found
+    print(f"Found: {name} ({kind}, message {msg.id}, {getattr(msg, 'date', '?')})")
     try:
         saved = await client.download_media(msg, file=tmp_out)
     except Exception as exc:
@@ -162,7 +184,7 @@ async def main():
         "file": os.path.basename(saved),
         "original_name": name,
         "version": version,
-        "arch": ARCH,
+        "arch": kind,
         "channel": CHANNEL,
         "topic": TOPIC,
         "message_id": msg.id,

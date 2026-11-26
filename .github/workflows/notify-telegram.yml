@@ -235,7 +235,11 @@ jobs:
                       h.update(chunk)
               sha256 = h.hexdigest()
 
+          # Hashtags on top - right below the banner.
+          hashtags = "#ZyteKernel #selene #eos #svendor"
+
           caption = (
+              f"{hashtags}\n\n"
               f"<b>{title}</b>\n"
               f"<i>Version: v{html.escape(version)}</i>\n"
               f"<i>{tag}</i>\n"
