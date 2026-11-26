@@ -84,7 +84,6 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
           VERSION: ${{ steps.artifact.outputs.version }}
           ZIP_PATH: ${{ steps.artifact.outputs.zip_path }}
         run: |
@@ -95,7 +94,6 @@ jobs:
           token = os.environ["BOT_TOKEN"]
           chat_id = os.environ["CHANNEL_ID"]
           repo = os.environ["REPO"]
-          run_url = html.escape(os.environ["RUN_URL"])
           zip_path = os.environ.get("ZIP_PATH") or ""
 
           api_url = f"https://api.github.com/repos/{repo}/releases?per_page=10"
@@ -167,8 +165,9 @@ jobs:
               value = cells[1].replace("**", "")
               body_lines.append(f"• {html.escape(key)}: {html.escape(value)}")
 
-          quote_lines = [f"• Zyte Kernel v{html.escape(version)}"]
-          quote_lines.append("• Redmi 10 / 2022 / Prime (selene) · MT6768")
+          # The caption already carries the version and the device, so the
+          # blockquote only lists the components and the build details.
+          quote_lines = []
           if comp_lines:
               # Versions from the stats file, then kernel/release/clang rows.
               quote_lines.extend(comp_lines)
@@ -192,23 +191,6 @@ jobs:
               stat_parts.append(f"ccache <code>{bar}</code> {float(rate):.0f}%")
           build_line = " · ".join(stat_parts)
 
-          # The package links straight to the release asset, so tapping it
-          # starts the download and the post stays a single message. If the
-          # asset is missing, fall back to attaching the file itself.
-          asset_url = ""
-          if zip_name:
-              for asset in rel.get("assets", []):
-                  if asset.get("name") == zip_name:
-                      asset_url = asset.get("browser_download_url") or ""
-                      break
-          if asset_url:
-              package = (f'<a href="{html.escape(asset_url)}">'
-                         f'\U0001F4E6 {html.escape(zip_name)}</a>')
-          elif zip_path and os.path.exists(zip_path):
-              package = f"\U0001F4E6 {html.escape(os.path.basename(zip_path))} (attached below)"
-          else:
-              package = f'<a href="{run_url}">Workflow Run</a>'
-
           # SHA-256 of the package we are about to upload.
           sha256 = ""
           if zip_path and os.path.exists(zip_path):
@@ -224,15 +206,29 @@ jobs:
               f"<i>{tag}</i>\n"
               f"<i>Redmi 10 / 2022 / Prime (selene) · MT6768</i>\n"
               + (f"<i>{build_line}</i>\n" if build_line else "")
-              + f"\n<blockquote>{changelog}</blockquote>\n\n"
-              f"<b>Package:</b>\n"
-              f"{package}"
+              + f"\n<blockquote>{changelog}</blockquote>"
           )
           if sha256:
               caption += f"\n\n<code>SHA256\n{sha256}</code>"
 
+          # One single message: the flashable zip itself, with the banner as
+          # its thumbnail and the whole announcement as its caption.
           banner_path = ".github/assets/zyte_banner.png"
-          if os.path.exists(banner_path):
+          thumb_path = ".github/assets/zyte_banner_thumb.png"
+
+          if zip_path and os.path.exists(zip_path):
+              files = {"document": (os.path.basename(zip_path), open(zip_path, "rb"))}
+              if os.path.exists(thumb_path):
+                  files["thumbnail"] = ("thumbnail.png", open(thumb_path, "rb"), "image/png")
+              r = requests.post(
+                  f"https://api.telegram.org/bot{token}/sendDocument",
+                  data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
+                  files=files,
+                  timeout=300,
+              )
+              r.raise_for_status()
+          elif os.path.exists(banner_path):
+              # No package available - post the banner with the same caption.
               with open(banner_path, "rb") as img:
                   r = requests.post(
                       f"https://api.telegram.org/bot{token}/sendPhoto",
@@ -242,7 +238,7 @@ jobs:
                   )
               r.raise_for_status()
           else:
-              # No banner in the repo - still deliver the message itself.
+              # No banner and no package - still deliver the message itself.
               r = requests.post(
                   f"https://api.telegram.org/bot{token}/sendMessage",
                   data={
@@ -253,21 +249,5 @@ jobs:
                   },
                   timeout=60,
               )
-              r.raise_for_status()
-
-          # Attach the flashable zip itself only when there is no direct
-          # download link - otherwise the channel gets a single message.
-          if not asset_url and zip_path and os.path.exists(zip_path):
-              doc_caption = (f"<b>Zyte Kernel v{html.escape(version)}</b>\n"
-                             f"{html.escape(os.path.basename(zip_path))}")
-              if sha256:
-                  doc_caption += f"\n<code>SHA256: {sha256}</code>"
-              with open(zip_path, "rb") as fh:
-                  r = requests.post(
-                      f"https://api.telegram.org/bot{token}/sendDocument",
-                      data={"chat_id": chat_id, "caption": doc_caption, "parse_mode": "HTML"},
-                      files={"document": (os.path.basename(zip_path), fh)},
-                      timeout=300,
-                  )
               r.raise_for_status()
           EOF
