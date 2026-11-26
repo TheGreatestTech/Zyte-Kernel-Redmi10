@@ -126,26 +126,45 @@ echo "1.1" > VERSION     # v1.0 -> v1.1
 It is used everywhere: `uname -r` (`...-ZyteKernel-v1.1`), the zip name, the GitHub
 release tag/title and the Telegram post.
 
-### Policy: bumps are opt-in
+### Policy: the version follows the dependencies
 
-A weekly rebuild is the **same release** built against newer upstream BakaSU/NoMount
-commits - not a new version. The build date in the tag plus the dependency commit SHAs
-in the release body already identify each build exactly.
+The build compares the dependencies of this build with the ones of the last release.
+They are remembered in [`dependencies.json`](dependencies.json):
+
+```json
+{
+  "kernel": "1fbd52855444",
+  "nomount": "v2.3.1",
+  "root": "v4.2.0-rc3",
+  "susfs": "v2.4.0"
+}
+```
+
+When **something changed** (a newer BakaSU, a newer NoMount, a new SUSFS or a new
+kernel pin) the version moves by one step:
+
+```
+1.0 → 1.1 → 1.2 → … → 1.9 → 1.10 → 2.0 → 2.1 → …
+```
+
+The minor part counts up to **10**, then the major part takes over. When nothing
+changed, the version stays - the weekly rebuild is the same release with a new date.
 
 | `version_bump` input | Effect |
 |---|---|
-| `none` *(default, and always for scheduled runs)* | keep the current version |
-| `patch` | `1.0` → `1.0.1` |
-| `minor` | `1.0` → `1.1.0` |
-| `major` | `1.0` → `2.0.0` |
+| `auto` *(default)* | +0.1 when a dependency changed, otherwise keep the version |
+| `major` | always the whole version: `1.9` → `2.0` - use it when you changed something yourself |
+| `patch` | always the `auto` step, even when nothing changed |
+| `none` | never touch the version |
 
-* **Weekly rebuild** → `zyte-kernel-v1.0-<date>` (same version, new date)
-* **A real change** → dispatch with `patch`/`minor`/`major` → the version moves and is
-  committed back to the branch
+* **Weekly rebuild, nothing changed** → `zyte-kernel-v1.0-<date>` (same version, new date)
+* **BakaSU/NoMount moved** → `v1.1`, and `dependencies.json` is updated with it
+* **You changed something** → dispatch with `major` → `v1` → `v2`
 
 [`scripts/bump-version.sh`](scripts/bump-version.sh) does the bump and exports the new
-version to `$GITHUB_ENV` for the release tag and Telegram. If the push fails (two runs
-at once), the build still succeeds with a warning.
+version to `$GITHUB_ENV` for the release tag and Telegram. The new `VERSION` and
+`dependencies.json` are committed back to the branch - if the push fails (two runs at
+once), the build still succeeds with a warning.
 
 ## CI
 

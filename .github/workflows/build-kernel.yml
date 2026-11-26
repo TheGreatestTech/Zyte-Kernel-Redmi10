@@ -29,15 +29,15 @@ on:
         default: '5'
         type: string
       version_bump:
-        description: 'Version bump applied before this build (none = rebuild the current release)'
+        description: 'Version bump (auto = +0.1 when a dependency changed, major = whole version)'
         required: false
-        default: 'none'
+        default: 'auto'
         type: choice
         options:
-          - none
-          - patch
-          - minor
+          - auto
           - major
+          - patch
+          - none
   schedule:
     - cron: '0 0 * * 0'
 
@@ -92,43 +92,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           echo "BUILD_DATE=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_ENV"
-
-      - name: Bump version
-        env:
-          # A scheduled run has no inputs -> no bump. Only a manual dispatch
-          # can move the version, and only when the user asks for it.
-          BUMP_TYPE: ${{ inputs.version_bump || 'none' }}
-        run: |
-          set -Eeuo pipefail
-          OLD_VERSION="$(tr -d '[:space:]' < VERSION)"
-          echo "Current version: v$OLD_VERSION (bump type: $BUMP_TYPE)"
-
-          bash scripts/bump-version.sh "$BUMP_TYPE"
-          NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
-          echo "New version: v$NEW_VERSION"
-
-          if [[ "$BUMP_TYPE" != "none" && "$NEW_VERSION" == "$OLD_VERSION" ]]; then
-            echo "::error::Version bump did not change VERSION ($OLD_VERSION)"
-            exit 1
-          fi
-
-          if git diff --quiet -- VERSION; then
-            echo "Version unchanged on purpose (bump: $BUMP_TYPE)"
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
-          git add VERSION
-          git commit -m "chore: bump version to v$NEW_VERSION"
-
-          BRANCH="${{ github.ref_name }}"
-          if ! git push origin "HEAD:$BRANCH"; then
-            echo "::warning::Could not push the version bump to $BRANCH (another run may have bumped it)"
-          else
-            echo "Pushed version v$NEW_VERSION to $BRANCH"
-          fi
 
       - name: Free runner disk space
         uses: jlumbroso/free-disk-space@main
@@ -293,6 +256,49 @@ jobs:
         run: |
           set -Eeuo pipefail
           bash ./build.sh --ci-integrate-only --variant "${{ inputs.variant || 'all-in-one' }}"
+
+      - name: Resolve version
+        env:
+          # auto  - bump the minor part by one when a dependency changed
+          #         (1.0 -> 1.1 -> ... -> 1.9 -> 1.10 -> 2.0)
+          # major - always bump the whole version (v1 -> v2)
+          # patch - always do the "auto" step
+          # none  - never touch the version
+          #
+          # The dependencies are known here: the integration step resolved
+          # the BakaSU / NoMount / SUSFS versions and the kernel commit.
+          BUMP_TYPE: ${{ inputs.version_bump || 'auto' }}
+        run: |
+          set -Eeuo pipefail
+          OLD_VERSION="$(tr -d '[:space:]' < VERSION)"
+          echo "Current version: v$OLD_VERSION (bump type: $BUMP_TYPE)"
+          echo "Dependencies: root=${KAZESU_VERSION:-unknown} nomount=${NOMOUNT_VERSION:-unknown} susfs=${SUSFS_VERSION:-unknown} kernel=${KERNEL_COMMIT:-unknown}"
+
+          bash scripts/bump-version.sh "$BUMP_TYPE"
+          NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
+          echo "New version: v$NEW_VERSION"
+
+          if [[ ( "$BUMP_TYPE" == "major" || "$BUMP_TYPE" == "patch" ) && "$NEW_VERSION" == "$OLD_VERSION" ]]; then
+            echo "::error::Version bump did not change VERSION ($OLD_VERSION)"
+            exit 1
+          fi
+
+          if git diff --quiet -- VERSION dependencies.json; then
+            echo "Version unchanged (bump: $BUMP_TYPE)"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION dependencies.json
+          git commit -m "chore: version v$NEW_VERSION"
+
+          BRANCH="${{ github.ref_name }}"
+          if ! git push origin "HEAD:$BRANCH"; then
+            echo "::warning::Could not push the version bump to $BRANCH (another run may have bumped it)"
+          else
+            echo "Pushed version v$NEW_VERSION to $BRANCH"
+          fi
 
       - name: Build kernel
         env:
