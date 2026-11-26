@@ -7,6 +7,7 @@
 /out/
 /releases/
 /.ccache/
+/.ccache-bin/
 /zips/
 
 # Fetched on demand (CI clones/downloads them, locally build.sh fetches them)

@@ -487,27 +487,7 @@ preflight() {
         ccache --max-size="$CCACHE_MAXSIZE" >/dev/null 2>&1 || true
         ccache -z >/dev/null 2>&1 || true  # zero stats for this build
 
-        # Kbuild with LLVM=1 does `CC = clang` inside the kernel Makefile,
-        # and a makefile assignment beats the environment - so "CC=ccache
-        # clang" is silently ignored and the compiler is called directly.
-        # The only reliable way to intercept every invocation is to put a
-        # directory with ccache symlinks (clang -> ccache) in front of the
-        # toolchain: ccache then finds the real clang further down the PATH.
-        local CCACHE_BIN="$OUT/.ccache-bin"
-        mkdir -p "$CCACHE_BIN"
-        local ccache_bin
-        ccache_bin="$(command -v ccache)"
-        for cc in clang clang++; do
-            ln -sf "$ccache_bin" "$CCACHE_BIN/$cc"
-        done
-        export PATH="$CCACHE_BIN:$PATH"
-
-        # Fail loudly instead of silently building without a cache.
-        if ! "$CCACHE_BIN/clang" --version >/dev/null 2>&1; then
-            warn "ccache wrapper does not work - continuing without ccache"
-        else
-            info "ccache enabled (dir: $CCACHE_DIR, max: $CCACHE_MAXSIZE, wrapper: $CCACHE_BIN)"
-        fi
+        info "ccache enabled (dir: $CCACHE_DIR, max: $CCACHE_MAXSIZE)"
     fi
 
     local tool
@@ -1071,8 +1051,37 @@ expected_units() {
     fi
 }
 
+# Kbuild with LLVM=1 does `CC = clang` inside the kernel Makefile, and a
+# makefile assignment beats the environment - so "CC=ccache clang" is
+# silently ignored and the compiler is called directly. The only reliable way
+# to intercept every invocation is to put a directory with ccache symlinks
+# (clang -> ccache) in front of the toolchain: ccache then finds the real
+# clang further down the PATH and skips its own symlink.
+#
+# This runs right before make, because --clean removes out/ and the wrapper
+# must not live there.
+setup_ccache_wrapper() {
+    command -v ccache >/dev/null 2>&1 || return 0
+
+    local wrapper="$ROOT/.ccache-bin"
+    mkdir -p "$wrapper"
+    local ccache_bin
+    ccache_bin="$(command -v ccache)"
+    for cc in clang clang++; do
+        ln -sf "$ccache_bin" "$wrapper/$cc"
+    done
+    export PATH="$wrapper:$PATH"
+
+    if "$wrapper/clang" --version >/dev/null 2>&1; then
+        info "ccache wrapper ready ($wrapper) - the compiler goes through ccache"
+    else
+        warn "ccache wrapper does not work - continuing without ccache"
+    fi
+}
+
 compile_kernel() {
     section "Compilation"
+    setup_ccache_wrapper
     info "Building Image.gz-dtb with -j$JOBS"
     printf '  %sFull log: %s%s\n' "$GRY" "$(relpath "$LOG")" "$R"
 
