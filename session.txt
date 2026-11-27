@@ -1,7 +1,0 @@
-Enter the login code from Telegram: Logged in.
-
-Add this as the TELEGRAM_SESSION secret (353 characters):
-
-1BVtsOJ0BuzcgzwVQea3pc24icqRCQ_T0awAeDGb92OZph9WWyRrqzu9n09p61FCacJyEuHOxTo5G61lMhhDT0EmUOJZwUtvJRbZ9CaQtCOTVVJprw2qjrUmIsj0CGW4VTwvvC_jkwlla4Zsv6B5LhWm__GaTmBGwHvUMcFbrVixJMIGdMrzc8XscJ4AKBteByGJhyKlCiXutgb8f6erruIBShUe0aBdyD59khC0uL8b8NzxCOg0epa_fkRtGZxHHKtxehajcRED1iPmW2Yff-vkvqp4G8Tmd-HsUnfCutNGQWwhuCKGFj4F27XpEIJ3FdzUyqZjtHFOATDf2sr5bxTRy1uA-t_c=
-
-Copy that single line - nothing else, no quotes, no line breaks.

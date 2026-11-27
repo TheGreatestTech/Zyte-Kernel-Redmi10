@@ -69,6 +69,40 @@ def normalize_session(raw):
     return best
 
 
+def fix_session(session):
+    """Bring a StringSession into the canonical format.
+
+    Telethon detects the format by the exact length of the payload
+    ("ip_len = 4 if len(string) == 352 else 16"), so a single missing or
+    extra character makes it try to unpack 275 bytes out of 263.
+
+    The old format (4 byte ip) is re-encoded as the new one (16 byte ip),
+    which is unambiguous.
+    """
+    import base64
+    import struct
+
+    if not session.startswith("1"):
+        return session, "does not start with the version character '1'"
+
+    payload = session[1:]
+    try:
+        raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+    except Exception as exc:
+        return session, f"is not valid base64 ({exc})"
+
+    if len(raw) == 275:
+        return session, "is already in the canonical format"
+    if len(raw) == 263:
+        # '>B4sH256s' -> '>B16sH256s'
+        packed = struct.pack(">B16sH256s", raw[0], raw[1:5].ljust(16, b"\x00"),
+                             raw[5:7], raw[7:])
+        fixed = "1" + base64.urlsafe_b64encode(packed).decode().rstrip("=")
+        return fixed, "was converted to the canonical format"
+    return session, (f"decodes to {len(raw)} bytes - expected 263 or 275, "
+                     f"so it is truncated or has extra characters")
+
+
 async def main():
     # --check verifies a session that is already stored somewhere.
     if CHECK_ONLY:
@@ -107,6 +141,11 @@ async def main():
         session = client.session.save()
         if not session:
             sys.exit("Could not create a session - check api_id/api_hash and the phone number.")
+
+        # Always hand out the canonical format, so the secret has exactly one
+        # valid length.
+        session, note = fix_session(session)
+        print(f"Session ({note}): {len(session)} characters")
 
         print()
         print(f"Add this as the TELEGRAM_SESSION secret ({len(session)} characters):")

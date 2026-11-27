@@ -89,6 +89,44 @@ def normalize_session(raw):
     return best
 
 
+def fix_session(session):
+    """Bring a StringSession into the canonical format.
+
+    Telethon detects the format by the exact length of the payload
+    ("ip_len = 4 if len(string) == 352 else 16"), so a single missing or
+    extra character makes it try to unpack 275 bytes out of 263.
+
+    The old format (4 byte ip) is re-encoded as the new one (16 byte ip),
+    which is unambiguous.
+    """
+    import base64
+    import struct
+
+    if not session.startswith("1"):
+        return session, "does not start with the version character '1'"
+
+    payload = session[1:]
+    try:
+        raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+    except Exception as exc:
+        return session, f"is not valid base64 ({exc})"
+
+    if len(raw) == 275:
+        return session, "is already in the canonical format"
+    if len(raw) == 263:
+        # '>B4sH256s' -> '>B16sH256s'
+        dc_id = raw[0]
+        ip = raw[1:5]
+        port = struct.unpack(">H", raw[5:7])[0]
+        key = raw[7:]
+        packed = struct.pack(">B16sH256s", dc_id, ip.ljust(16, b"\x00"), port, key)
+        # Keep the base64 padding - Telethon decodes without adding it.
+        fixed = "1" + base64.urlsafe_b64encode(packed).decode()
+        return fixed, "was converted to the canonical format"
+    return session, (f"decodes to {len(raw)} bytes - expected 263 or 275, "
+                     f"so it is truncated or has extra characters")
+
+
 async def main():
     api_id = os.environ.get("TELEGRAM_API_ID", "")
     api_hash = os.environ.get("TELEGRAM_API_HASH", "")
@@ -115,6 +153,9 @@ async def main():
     os.makedirs(os.path.dirname(tmp_out) or ".", exist_ok=True)
 
     session = normalize_session(session)
+    session, note = fix_session(session)
+    print(f"Session: {len(session)} characters, {note}")
+
     try:
         client = TelegramClient(StringSession(session), int(api_id), api_hash)
     except Exception as exc:
@@ -123,7 +164,7 @@ async def main():
               "scripts/telegram-login.py into the secret - not the api_hash, "
               "not the api_id and not the phone number.")
         print(f"::warning::The secret has {len(session)} usable characters "
-              "(a session is ~350).")
+              "(a session is 353 or 369).")
         return 0
 
     await client.connect()
