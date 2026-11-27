@@ -213,6 +213,15 @@ The session string is printed by the login helper - put it into
 *Settings → Secrets and variables → Actions*. The account must be a member of
 `@BakaSU_Grp` (a public group is enough).
 
+Copy **only** the long base64 line the helper prints. If the secret is wrong,
+the fetch step says so and skips the APK - it never breaks the build. You can
+check a session before you store it:
+
+```bash
+TELEGRAM_API_ID=... TELEGRAM_API_HASH=... TELEGRAM_SESSION=... \
+  python3 scripts/telegram-login.py --check
+```
+
 Without the secrets the step is skipped with a warning: the kernel release
 still publishes, just without the manager APK.
 

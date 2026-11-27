@@ -29,14 +29,49 @@ api_id = os.environ.get("TELEGRAM_API_ID", "")
 api_hash = os.environ.get("TELEGRAM_API_HASH", "")
 phone = os.environ.get("TELEGRAM_PHONE", "")
 
-missing = [n for n, v in (("TELEGRAM_API_ID", api_id),
-                          ("TELEGRAM_API_HASH", api_hash),
-                          ("TELEGRAM_PHONE", phone)) if not v]
+CHECK_ONLY = "--check" in sys.argv
+
+required = [("TELEGRAM_API_ID", api_id), ("TELEGRAM_API_HASH", api_hash)]
+if not CHECK_ONLY:
+    required.append(("TELEGRAM_PHONE", phone))
+missing = [n for n, v in required if not v]
 if missing:
     sys.exit("Missing: " + ", ".join(missing))
 
 
+def normalize_session(raw):
+    """Clean up a pasted StringSession (quotes, line breaks, extra text)."""
+    import re
+
+    text = raw.strip().strip("\"").strip("'")
+    best = ""
+    for line in text.splitlines():
+        cleaned = re.sub(r"[^A-Za-z0-9_+=/-]", "", line.strip())
+        if len(cleaned) > len(best):
+            best = cleaned
+    return best
+
+
 async def main():
+    # --check verifies a session that is already stored somewhere.
+    if CHECK_ONLY:
+        session = normalize_session(os.environ.get("TELEGRAM_SESSION", ""))
+        if not session:
+            sys.exit("TELEGRAM_SESSION is empty")
+        try:
+            client = TelegramClient(StringSession(session), int(api_id), api_hash)
+        except Exception as exc:
+            sys.exit(f"Not a valid StringSession: {exc}")
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                sys.exit("The session is not authorized (log in again)")
+            me = await client.get_me()
+            print(f"Session OK - {me.first_name} (@{me.username}) {me.phone}")
+        finally:
+            await client.disconnect()
+        return
+
     # Every Telethon method is a coroutine - they must be awaited.
     client = TelegramClient(StringSession(), int(api_id), api_hash)
     await client.connect()
@@ -57,10 +92,11 @@ async def main():
             sys.exit("Could not create a session - check api_id/api_hash and the phone number.")
 
         print()
-        print("Add this as the TELEGRAM_SESSION secret:")
+        print(f"Add this as the TELEGRAM_SESSION secret ({len(session)} characters):")
         print()
         print(session)
         print()
+        print("Copy that single line - nothing else, no quotes, no line breaks.")
     finally:
         await client.disconnect()
 

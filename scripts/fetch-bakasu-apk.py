@@ -73,6 +73,22 @@ def sanitize(name):
     return name or "BakaSU.apk"
 
 
+def normalize_session(raw):
+    """Clean up a pasted StringSession.
+
+    The session is one long base64url string. People paste it with quotes,
+    with line breaks or together with the "Add this as the secret" header -
+    so take the longest base64-looking chunk of it.
+    """
+    text = raw.strip().strip("\"").strip("'")
+    best = ""
+    for line in text.splitlines():
+        cleaned = re.sub(r"[^A-Za-z0-9_+=/-]", "", line.strip())
+        if len(cleaned) > len(best):
+            best = cleaned
+    return best
+
+
 async def main():
     api_id = os.environ.get("TELEGRAM_API_ID", "")
     api_hash = os.environ.get("TELEGRAM_API_HASH", "")
@@ -97,7 +113,18 @@ async def main():
     # carries the original APK name (with its version in it).
     tmp_out = OUT or "releases/.bakaSU-download.apk"
     os.makedirs(os.path.dirname(tmp_out) or ".", exist_ok=True)
-    client = TelegramClient(StringSession(session), int(api_id), api_hash)
+
+    session = normalize_session(session)
+    try:
+        client = TelegramClient(StringSession(session), int(api_id), api_hash)
+    except Exception as exc:
+        print(f"::warning::TELEGRAM_SESSION does not look like a Telegram StringSession: {exc}")
+        print("::warning::Copy the long base64 string printed by "
+              "scripts/telegram-login.py into the secret - not the api_hash, "
+              "not the api_id and not the phone number.")
+        print(f"::warning::The secret has {len(session)} usable characters "
+              "(a session is ~350).")
+        return 0
 
     await client.connect()
     if not await client.is_user_authorized():
@@ -204,4 +231,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    try:
+        sys.exit(asyncio.run(main()))
+    except SystemExit:
+        raise
+    except Exception as exc:
+        # The manager APK is optional - never fail the build because of it.
+        print(f"::warning::Could not fetch the BakaSU APK: {exc}")
+        sys.exit(0)
