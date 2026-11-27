@@ -95,9 +95,13 @@ def fix_session(session):
         return session, "is already in the canonical format"
     if len(raw) == 263:
         # '>B4sH256s' -> '>B16sH256s'
-        packed = struct.pack(">B16sH256s", raw[0], raw[1:5].ljust(16, b"\x00"),
-                             raw[5:7], raw[7:])
-        fixed = "1" + base64.urlsafe_b64encode(packed).decode().rstrip("=")
+        dc_id = raw[0]
+        ip = raw[1:5]
+        port = struct.unpack(">H", raw[5:7])[0]
+        key = raw[7:]
+        packed = struct.pack(">B16sH256s", dc_id, ip.ljust(16, b"\x00"), port, key)
+        # Keep the base64 padding - Telethon decodes without adding it.
+        fixed = "1" + base64.urlsafe_b64encode(packed).decode()
         return fixed, "was converted to the canonical format"
     return session, (f"decodes to {len(raw)} bytes - expected 263 or 275, "
                      f"so it is truncated or has extra characters")
