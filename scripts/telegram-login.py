@@ -118,12 +118,16 @@ async def main():
             if not await client.is_user_authorized():
                 sys.exit("The session is not authorized (log in again)")
             me = await client.get_me()
-            print(f"Session OK - {me.first_name} (@{me.username}) {me.phone}")
+            print(f"Session OK with TELEGRAM_API_ID={api_id} - "
+                  f"{me.first_name} (@{me.username}) {me.phone}")
         finally:
             await client.disconnect()
         return
 
     # Every Telethon method is a coroutine - they must be awaited.
+    print(f"Logging in with TELEGRAM_API_ID={api_id}")
+    print("Use exactly this api_id for the TELEGRAM_API_ID secret - Telegram binds "
+          "every session to it.")
     client = TelegramClient(StringSession(), int(api_id), api_hash)
     await client.connect()
 

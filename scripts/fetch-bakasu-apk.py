@@ -155,6 +155,7 @@ async def main():
     session = normalize_session(session)
     session, note = fix_session(session)
     print(f"Session: {len(session)} characters, {note}")
+    print(f"Using TELEGRAM_API_ID={api_id}")
 
     try:
         client = TelegramClient(StringSession(session), int(api_id), api_hash)
@@ -167,9 +168,24 @@ async def main():
               "(a session is 353 or 369).")
         return 0
 
-    await client.connect()
+    try:
+        await client.connect()
+    except Exception as exc:
+        name = type(exc).__name__
+        if name == "AuthKeyNotFound":
+            print("::warning::Telegram does not know this session's auth key.")
+            print("::warning::The usual cause is a different TELEGRAM_API_ID than the "
+                  "one the session was created with - Telegram binds every auth key "
+                  "to the api_id.")
+            print(f"::warning::This run uses TELEGRAM_API_ID={api_id}. Log in with the "
+                  "same api_id (scripts/telegram-login.py) and store the new session.")
+        else:
+            print(f"::warning::Could not connect to Telegram: {exc}")
+        await client.disconnect()
+        return 0
+
     if not await client.is_user_authorized():
-        print("::warning::The Telegram session is no longer valid - skipping the BakaSU APK")
+        print("::warning::The Telegram session is not authorized - skipping the BakaSU APK")
         await client.disconnect()
         return 0
 
