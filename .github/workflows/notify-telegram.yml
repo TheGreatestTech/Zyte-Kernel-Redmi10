@@ -64,7 +64,6 @@ jobs:
 
           gh run download "$RUN_ID" --name "$ARTIFACT" --dir artifacts
           ZIP="$(find artifacts -type f -name '*.zip' -print -quit)"
-          APK="$(find artifacts -type f -name '*.apk' -print -quit)"
 
           # The zip name carries the release version (…-v1.0.1-<stamp>.zip).
           # Prefer it over the VERSION file: the build run bumped the version
@@ -77,7 +76,6 @@ jobs:
 
           echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
           echo "zip_path=${ZIP:-}" >> "$GITHUB_OUTPUT"
-          echo "apk_path=${APK:-}" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Downloaded $ARTIFACT (version v$VERSION)"
 
@@ -88,7 +86,6 @@ jobs:
           REPO: ${{ github.repository }}
           VERSION: ${{ steps.artifact.outputs.version }}
           ZIP_PATH: ${{ steps.artifact.outputs.zip_path }}
-          APK_PATH: ${{ steps.artifact.outputs.apk_path }}
           ARTIFACT: ${{ steps.artifact.outputs.artifact }}
           # The releases API is called without auth otherwise -> 60 requests/hour
           # per IP, and the hosted runners share their IPs. With the token the
@@ -201,17 +198,6 @@ jobs:
               quote_lines.extend(body_lines)
           changelog = "\n".join(quote_lines)[:600]
 
-          # Metadata of the BakaSU manager APK (fetched by the build workflow).
-          apk_meta = {}
-          for root, _dirs, files in os.walk("artifacts"):
-              if "bakasu-apk.json" in files:
-                  try:
-                      with open(os.path.join(root, "bakasu-apk.json")) as fh:
-                          apk_meta = json.load(fh)
-                  except Exception:
-                      apk_meta = {}
-                  break
-
           # SHA-256 of the package we are about to upload.
           sha256 = ""
           if zip_path and os.path.exists(zip_path):
@@ -230,8 +216,7 @@ jobs:
               f"<i>Version: v{html.escape(version)}</i>\n"
               f"<i>{tag}</i>\n"
               f"<i>Redmi 10 / 2022 / Prime (selene) · MT6768</i>\n"
-              + (f"<i>\U0001F4F1 Manager: BakaSU v{html.escape(apk_meta.get('version') or 'unknown')}"
-                 f" ({html.escape(apk_meta.get('arch') or 'arm64-v8a')})</i>\n" if apk_meta else "")
+              + f'<b>Manager:</b> <a href="https://t.me/BakaSU_Grp/4">BakaSU APK</a>\n'
               + f"\n<blockquote>{changelog}</blockquote>"
           )
           if sha256:
@@ -323,39 +308,13 @@ jobs:
               r.raise_for_status()
               doc_msg_id = (r.json().get("result") or {}).get("message_id")
 
-          # 3. the BakaSU manager APK (only when the build fetched one)
-          apk_path = os.environ.get("APK_PATH") or ""
-          apk_msg_id = None
-          apk_name = os.path.basename(apk_path) if apk_path else ""
-          if apk_path and os.path.exists(apk_path):
-              apk_caption = f"<b>BakaSU manager</b>\n{html.escape(apk_name)}"
-              apk_version = apk_meta.get("version")
-              if apk_version:
-                  apk_caption = f"<b>BakaSU manager v{html.escape(apk_version)}</b>\n{html.escape(apk_name)}"
-              if apk_meta.get("sha256"):
-                  apk_caption += f"\n<code>SHA256: {apk_meta['sha256']}</code>"
-              with open(apk_path, "rb") as fh:
-                  r = requests.post(
-                      f"https://api.telegram.org/bot{token}/sendDocument",
-                      data={"chat_id": chat_id, "caption": apk_caption, "parse_mode": "HTML"},
-                      files={"document": (apk_name, fh)},
-                      timeout=300,
-                  )
-              r.raise_for_status()
-              apk_msg_id = (r.json().get("result") or {}).get("message_id")
-
-          # 4. link the announcement to the files
+          # 3. link the announcement to the file
           if photo_msg_id and doc_msg_id and chat_link_base:
               link = f"{chat_link_base}/{doc_msg_id}"
-              links = f'<a href="{html.escape(link)}">\U0001F4E6 {html.escape(zip_name)}</a>'
-              if apk_msg_id:
-                  apk_link = f"{chat_link_base}/{apk_msg_id}"
-                  links += (f"\n<a href=\"{html.escape(apk_link)}\">"
-                            f"\U0001F4F1 BakaSU manager APK</a>")
               linked = (
                   caption
                   + f"\n\n<b>Package:</b>\n"
-                  + links
+                  + f'<a href="{html.escape(link)}">\U0001F4E6 {html.escape(zip_name)}</a>'
               )
               try:
                   r = requests.post(

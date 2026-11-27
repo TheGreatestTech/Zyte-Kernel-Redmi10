@@ -196,34 +196,14 @@ to the second token if the first one cannot publish.
 
 ### BakaSU manager APK
 
-The build also grabs the latest BakaSU **manager APK** (`arm64-v8a`) from the
-`@BakaSU_Grp` topic `4` and publishes it next to the kernel: it is attached to
-the GitHub release, added to the artifact and sent to Telegram.
+The manager APK is **not** shipped with the release - the BakaSU team posts
+fresh builds in their group, so the post and the release notes simply link
+there:
 
-That group has no public web preview, so the file can only be read over
-MTProto with a user session. Three repository secrets are needed:
+* Telegram: <https://t.me/BakaSU_Grp/4>
+* Release notes: the installation section points to the same topic
 
-| Secret | Where it comes from |
-|--------|---------------------|
-| `TELEGRAM_API_ID` | [my.telegram.org](https://my.telegram.org) → API Development Tools |
-| `TELEGRAM_API_HASH` | same page |
-| `TELEGRAM_SESSION` | `python3 scripts/telegram-login.py` (run locally once) |
-
-The session string is printed by the login helper - put it into
-*Settings → Secrets and variables → Actions*. The account must be a member of
-`@BakaSU_Grp` (a public group is enough).
-
-Copy **only** the long base64 line the helper prints. If the secret is wrong,
-the fetch step says so and skips the APK - it never breaks the build. You can
-check a session before you store it:
-
-```bash
-TELEGRAM_API_ID=... TELEGRAM_API_HASH=... TELEGRAM_SESSION=... \
-  python3 scripts/telegram-login.py --check
-```
-
-Without the secrets the step is skipped with a warning: the kernel release
-still publishes, just without the manager APK.
+Take the `arm64-v8a` build (the MT6768 is arm64).
 
 ### CI performance
 
