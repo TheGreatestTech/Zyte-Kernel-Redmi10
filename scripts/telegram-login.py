@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Create a Telegram StringSession for the CI (run this locally, once).
 
-Usage:
+Usage (bash):
     TELEGRAM_API_ID=12345678 \\
     TELEGRAM_API_HASH=abcdef... \\
     TELEGRAM_PHONE=+91XXXXXXXXXX \\
     python3 scripts/telegram-login.py
+
+Usage (fish, or no shell at all):
+    python3 scripts/telegram-login.py --api-id 12345678 \\
+        --api-hash abcdef... --phone +91XXXXXXXXXX
+
+Check a session you already have:
+    python3 scripts/telegram-login.py --api-id ... --api-hash ... \\
+        --session <the long string> --check
 
 It prints a long session string. Put it into the repository secret
 TELEGRAM_SESSION (Settings -> Secrets and variables -> Actions).
@@ -25,9 +33,18 @@ try:
 except ImportError:
     sys.exit("telethon is missing - install it with: pip install telethon")
 
-api_id = os.environ.get("TELEGRAM_API_ID", "")
-api_hash = os.environ.get("TELEGRAM_API_HASH", "")
-phone = os.environ.get("TELEGRAM_PHONE", "")
+def arg(flag, env):
+    """A value from the command line or from the environment."""
+    if flag in sys.argv:
+        i = sys.argv.index(flag)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return os.environ.get(env, "")
+
+
+api_id = arg("--api-id", "TELEGRAM_API_ID")
+api_hash = arg("--api-hash", "TELEGRAM_API_HASH")
+phone = arg("--phone", "TELEGRAM_PHONE")
 
 CHECK_ONLY = "--check" in sys.argv
 
@@ -55,7 +72,7 @@ def normalize_session(raw):
 async def main():
     # --check verifies a session that is already stored somewhere.
     if CHECK_ONLY:
-        session = normalize_session(os.environ.get("TELEGRAM_SESSION", ""))
+        session = normalize_session(arg("--session", "TELEGRAM_SESSION"))
         if not session:
             sys.exit("TELEGRAM_SESSION is empty")
         try:
