@@ -141,7 +141,7 @@ They are remembered in [`dependencies.json`](dependencies.json):
 ```
 
 When **something changed** (a newer BakaSU, a newer NoMount, a new SUSFS or a new
-kernel pin) the version moves by one step:
+kernel commit) the version moves by one step:
 
 ```
 1.0 → 1.1 → 1.2 → … → 1.9 → 1.10 → 2.0 → 2.1 → …
@@ -170,7 +170,8 @@ once), the build still succeeds with a warning.
 
 `.github/workflows/build-kernel.yml` runs on schedule and on manual dispatch:
 
-1. clones the kernel at the pinned ref into `source/`
+1. clones the kernel into `source/` - the branch tip by default, so a kernel
+   update in the source repo is picked up automatically
 2. downloads Neutron Clang, clones the AnyKernel3 template
 3. `build.sh --ci-integrate-only` - patches the checkout
 4. `build.sh --clean --reconfig --variant <variant>`
@@ -217,8 +218,8 @@ Take the `arm64-v8a` build (the MT6768 is arm64).
   symlinks in front of the toolchain in `PATH`, which intercepts every compiler call.
 * **Concurrency** cancels superseded runs (`cancel-in-progress`), and the job is capped at
   **120 min** instead of the 6 h default.
-* **Shallow, adaptive kernel fetch** - depth 1 (the pin is the branch tip), deepening to
-  50/200 only if the pin needs it.
+* **Shallow, adaptive kernel fetch** - depth 1 for the branch tip, deepening to
+  50/200/1000 only when a specific commit is requested via `kernel_ref`.
 * **5 make jobs on 4 vCPU** (`jobs_count`) - oversubscribed because kernel builds block on I/O.
 * Artifacts are kept **30 days**; a build summary is written to the run page.
 

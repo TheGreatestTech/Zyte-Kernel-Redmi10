@@ -9,7 +9,7 @@ on:
         default: 'latest'
         type: string
       kernel_ref:
-        description: 'Kernel branch/tag/commit to build (default: pinned ref below)'
+        description: 'Kernel branch/tag/commit to build (default: the branch tip)'
         required: false
         default: ''
         type: string
@@ -53,10 +53,10 @@ env:
   KBUILD_BUILD_HOST: github
   KBUILD_BUILD_VERSION: '1'
   # The kernel source is a separate repository; this repo only carries the
-  # build script and the patches. Pin the ref so the patches always apply.
+  # build script and the patches. The branch tip is used, so a kernel update
+  # in the source repo is picked up automatically - no pin to bump here.
   KERNEL_REPO: 'https://github.com/TheGreatestTech/MT6768-Kernel-4.19.git'
   KERNEL_BRANCH: 'lineage-24.0'
-  KERNEL_PIN: '1fbd52855444'
   # ccache object cache cap (on-disk, compressed). One full selene build is
   # roughly 0.8-1.5 GB compressed, so 3 GB holds a couple of variants plus
   # headroom. Raising it only makes every run upload more: actions/cache keys
@@ -135,34 +135,46 @@ jobs:
       - name: Checkout kernel source
         run: |
           set -Eeuo pipefail
-          REF="${{ inputs.kernel_ref || env.KERNEL_PIN }}"
           rm -rf source
           mkdir -p source
           git -C source init -q
           git -C source remote add origin "$KERNEL_REPO"
 
-          # GitHub refuses "git fetch <sha>" unless the server allows it, so the
-          # pin is resolved from the branch history. Fetch the least history that
-          # can contain it: depth 1 is enough while the pin is the branch tip,
-          # and deeper fetches are incremental only when actually needed.
-          resolved=0
-          for depth in 1 50 200; do
-            git -C source fetch -q --depth "$depth" origin "$KERNEL_BRANCH"
-            if git -C source rev-parse --verify --quiet "$REF^{commit}" >/dev/null; then
-              git -C source checkout -q --detach "$REF"
-              echo "Kernel: pinned to $REF (history depth $depth)"
-              resolved=1
-              break
-            fi
-          done
-          if [[ "$resolved" -ne 1 ]]; then
-            if git -C source rev-parse --verify --quiet FETCH_HEAD >/dev/null; then
-              git -C source checkout -q --detach FETCH_HEAD
-              echo "::warning::'$REF' is not in '$KERNEL_BRANCH' - building the branch tip instead"
-            else
-              echo "::error::Could not resolve '$REF' from '$KERNEL_BRANCH'"
+          # Track the branch tip: a kernel update in the source repo is then
+          # picked up by the next run without touching this repo. A specific
+          # ref can still be requested per-run with the kernel_ref input.
+          git -C source fetch -q --depth 1 origin "$KERNEL_BRANCH"
+          if [[ -n "${{ inputs.kernel_ref }}" ]]; then
+            REF="${{ inputs.kernel_ref }}"
+            resolved=0
+            # A branch or tag fetches directly; a commit SHA has to be
+            # resolved from the branch history, because GitHub refuses
+            # "git fetch <sha>" for refs it does not advertise. Deepen the
+            # fetch until the commit shows up.
+            for depth in 1 50 200 1000; do
+              if git -C source fetch -q --depth "$depth" origin "$KERNEL_BRANCH"; then
+                # The ref may name a branch or tag of its own.
+                if git -C source fetch -q --depth "$depth" origin "$REF" 2>/dev/null; then
+                  git -C source checkout -q --detach FETCH_HEAD
+                  echo "Kernel: $REF (requested)"
+                  resolved=1
+                  break
+                fi
+                if git -C source rev-parse --verify --quiet "$REF^{commit}" >/dev/null; then
+                  git -C source checkout -q --detach "$REF"
+                  echo "Kernel: $REF (requested, history depth $depth)"
+                  resolved=1
+                  break
+                fi
+              fi
+            done
+            if [[ "$resolved" -ne 1 ]]; then
+              echo "::error::Could not resolve '$REF' from '$KERNEL_REPO'"
               exit 1
             fi
+          else
+            git -C source checkout -q --detach FETCH_HEAD
+            echo "Kernel: branch tip of $KERNEL_BRANCH"
           fi
           test -f source/Makefile
           echo "KERNEL_COMMIT=$(git -C source rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"

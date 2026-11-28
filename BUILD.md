@@ -10,7 +10,7 @@ kernel. The kernel sources live in a separate repository
 | `build.sh`  | Build + integration driver (BakaSU / SUSFS / NoMount)            |
 | `patches/`  | The integration as reviewable patches (applied at build time)    |
 | `.github/`  | CI workflow that builds & publishes the flashable zip           |
-| `source/`   | Kernel clone - **not committed** (CI clones it at a pinned ref) |
+| `source/`   | Kernel clone - **not committed** (CI clones the branch tip)   |
 
 `build.sh` works in both layouts: if `source/Makefile` exists it builds the kernel in
 `source/`, otherwise it builds the tree it lives in.
